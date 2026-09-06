@@ -15,7 +15,7 @@ install-frontend: ## 安装前端依赖
 install: install-backend install-frontend ## 安装所有依赖
 
 dev-backend: ## 启动后端开发服务器
-	cd backend && $(PYTHON) -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+	cd backend && $(PYTHON) -m app.serve --reload
 
 dev-frontend: ## 启动前端开发服务器
 	cd frontend && $(NPM) run dev

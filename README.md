@@ -41,7 +41,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-访问 `http://localhost:3000` 进入前端界面。
+访问 `http://localhost:8000` 进入界面。
 
 ### 本地开发
 
@@ -72,10 +72,14 @@ make dev-frontend
 
 ```
 Kuroko/
+├── Dockerfile        # 根目录多阶段镜像（前端构建 + 后端整合）
+├── docker-compose.yml# 单服务编排（挂载 config/data/logs）
+├── Makefile          # 构建命令（make dev-backend 使用 python -m app.serve）
 ├── backend/          # FastAPI 后端
 │   ├── app/
+│   │   ├── serve.py  # 服务启动入口（python -m app.serve）
 │   │   ├── api/      # API 路由
-│   │   ├── core/     # 核心配置
+│   │   ├── core/     # 核心配置与 SPA 挂载
 │   │   ├── models/   # 数据模型
 │   │   ├── schemas/  # Pydantic Schema
 │   │   ├── services/ # 业务逻辑
@@ -85,8 +89,6 @@ Kuroko/
 │   └── src/
 ├── docs/             # 项目文档
 │   └── dev/          # 开发文档
-├── docker-compose.yml
-├── Makefile
 └── AGENTS.md         # AI Agent 指导
 ```
 

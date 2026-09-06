@@ -4,8 +4,8 @@
 
 Kuroko 是一套面向媒体资源聚合解析、离线下载智能调度与存储空间规划管理的现代化 Web 应用，采用前后端分离架构设计。系统各核心组成如下：
 
-- **前端（Frontend）**：基于 React 19 构建的单页应用（SPA），生产环境中由 Nginx 提供高性能静态文件托管，开发环境中由 Vite 预览/开发服务器提供。
-- **后端（Backend）**：基于 FastAPI 构建高性能异步 RESTful API，承担用户鉴权、磁力链接解析清洗、番号提取与去重、存储路径决策及下载任务调度。
+- **前端（Frontend）**：基于 React 19 构建的单页应用（SPA），生产环境中由 FastAPI 的 `StaticFiles` 中间件提供静态文件托管，开发环境中由 Vite 开发服务器提供。
+- **后端（Backend）**：基于 FastAPI 构建高性能异步 RESTful API，承担用户鉴权、磁力链接解析清洗、番号提取与去重、存储路径决策及下载任务调度。生产环境同时托管前端静态文件。
 - **数据库（Database）**：采用 SQLite 作为主存储引擎，搭配 SQLAlchemy ORM，实现系统配置、番号记录、下载任务及存储分组配置的持久化，具备轻量、免运维与高可靠特性。
 - **外部依赖（External Services）**：
   - **OpenList**：文件管理与存储抽象平台，Kuroko 通过其开放 RESTful API 接入多网盘存储，并作为离线下载的底层执行引擎。
@@ -17,17 +17,13 @@ Kuroko 是一套面向媒体资源聚合解析、离线下载智能调度与存�
 graph TD
     User["用户浏览器 (Browser)"]
 
-    subgraph "Web 访问与反向代理"
-        Nginx["Nginx 服务器 (:80 / :443)"]
-        Frontend["前端静态资源 (React 19 SPA)"]
-    end
-
-    subgraph "Kuroko 后端核心服务"
+    subgraph "Kuroko 服务 (单容器)"
         FastAPI["FastAPI 后端应用 (Uvicorn)"]
+        Static["前端静态资源 (React 19 SPA)"]
     end
 
     subgraph "数据持久层"
-        SQLite[("SQLite 数据库 (kuroko.db)")]
+        SQLite[("SQLite 数据库")]
     end
 
     subgraph "外部协同服务"
@@ -35,9 +31,8 @@ graph TD
         BTParser["BT 解析服务 (磁力种子元数据解析 API)"]
     end
 
-    User -->|"HTTP/HTTPS 访问"| Nginx
-    Nginx -->|"静态文件路由 (/)"| Frontend
-    Nginx -->|"API 请求反代 (/api/v1/*)"| FastAPI
+    User -->|"HTTP 访问 (:8000)"| FastAPI
+    FastAPI -->|"StaticFiles 托管 (/)"| Static
 
     FastAPI -->|"SQLAlchemy ORM 读写"| SQLite
     FastAPI -->|"RESTful API (存储信息/任务下发/进度同步)"| OpenList
@@ -55,9 +50,11 @@ backend/
 ├── app/
 │   ├── __init__.py
 │   ├── main.py              # FastAPI 应用入口、中间件及全局异常处理
+│   ├── serve.py             # 服务启动入口（python -m app.serve，支持目录准备与优雅停机）
 │   ├── core/
 │   │   ├── __init__.py
 │   │   ├── config.py         # 应用配置（环境变量加载、默认值）
+│   │   ├── spa.py            # 前端 SPA 静态文件托管与路由回退支持（参考 Amane 设计）
 │   │   ├── security.py       # JWT 认证、密码哈希与加密算法
 │   │   └── database.py       # SQLAlchemy 引擎配置与 Session 依赖注入
 │   ├── api/
@@ -332,103 +329,55 @@ erDiagram
 
 ## 5. 部署架构
 
-Kuroko 采用轻量且容器隔离的 Docker Compose 部署形态，具备极简的安装与交付体验。
+Kuroko 采用**前后端合一单镜像**部署，前端构建产物并入 FastAPI 作为静态文件提供，无需独立 Nginx 容器。
 
 ```mermaid
 graph LR
     subgraph "宿主机 (Host OS)"
-        subgraph "Docker Compose 网络"
-            frontend["frontend 容器<br/>(Nginx 静态文件 + API 反代)"]
-            backend["backend 容器<br/>(FastAPI + Uvicorn)"]
+        subgraph "Docker 容器"
+            App["kuroko 容器<br/>(FastAPI + 前端静态文件)"]
         end
 
-        HostDB[("宿主机数据卷<br/>./data/kuroko.db")]
-        HostEnv[("环境变量文件<br/>.env")]
+        ConfigDir[("./config/")]
+        DataDir[("./data/")]
+        LogDir[("./logs/")]
     end
 
-    Client["用户浏览器"] -->|"访问暴露端口 (默认 :8080)"| frontend
-    frontend -->|"反向代理 /api/v1/* (backend:8000)"| backend
-    backend -->|"持久化读写"| HostDB
-    HostEnv -.->|"注入配置"| frontend
-    HostEnv -.->|"注入配置"| backend
+    Client["用户浏览器"] -->|"访问暴露端口 (默认 :8000)"| App
+    App -->|"读写配置"| ConfigDir
+    App -->|"持久化数据"| DataDir
+    App -->|"日志输出"| LogDir
 ```
 
-### 5.1 容器分工与部署规范
+### 5.1 镜像构建与容器设计
 
-1. **backend 容器**：
-   - 基础环境：Python 3.11+ slim；
-   - 运行服务：Uvicorn 托管的 FastAPI 异步 ASGI 服务；
-   - 数据持久化：将 SQLite 数据库文件（`kuroko.db`）挂载至宿主机的指定目录（如 `./data/`），避免容器重启或升级造成数据丢失。
-2. **frontend 容器**：
-   - 基础环境：轻量级 Nginx Alpine；
-   - 职能：
-     - 提供 SPA 单页静态文件分发，配置 `try_files $uri $uri/ /index.html` 保证客户端路由正常跳转；
-     - 配置反向代理规则，将 `/api/v1/` 请求转发至 `http://backend:8000`，彻底消除浏览器的跨域限制。
-3. **网络与配置管理**：
-   - 前后端容器加入同一个自定义 Docker Bridge 网络（如 `kuroko-net`），容器间使用内部服务名直连；
-   - 宿主机服务暴露端口（如前端端口 `8080`）及系统环境变量（如 `SECRET_KEY`、`OPENLIST_BASE_URL`）均通过 `.env` 声明管理。
+1. **多阶段 Dockerfile**（项目根目录）：
+   - 阶段 1：Node 22 构建前端 → 生成 `dist/` 静态产物；
+   - 阶段 2：Python 3.12-slim 安装后端依赖，将前端产物复制到 `/app/static`，通过 `mount_spa` 中间件与 FastAPI 深度集成。
+2. **启动命令规范**：
+   - 容器 CMD 采用 `python -m app.serve`（参考 Amane 实践），启动时自动完成 `config/`、`data/`、`logs/` 目录权限与生命周期检查，并编排 Uvicorn 优雅停机。
+3. **持久化与日志挂载目录**：
+   - `config/`：系统持久化配置文件目录；
+   - `data/`：应用运行时数据（SQLite 数据库等）；
+   - `logs/`：系统运行与审计日志。
+4. **端口**：仅暴露一个后端服务端口（默认 `8000`），通过 `BACKEND_PORT` 环境变量灵活指定。
 
 ### 5.2 部署文件示例
 
 #### docker-compose.yml
 ```yaml
-version: '3.8'
-
 services:
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: kuroko-backend
-    restart: unless-stopped
-    volumes:
-      - ${DATA_DIR:-./data}:/app/data
-    environment:
-      - DATABASE_URL=sqlite:////app/data/kuroko.db
-      - SECRET_KEY=${SECRET_KEY:-kuroko_default_secret_key_change_me}
-      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
-      - OPENLIST_BASE_URL=${OPENLIST_BASE_URL}
-      - OPENLIST_TOKEN=${OPENLIST_TOKEN}
-      - BT_PARSER_BASE_URL=${BT_PARSER_BASE_URL}
-    networks:
-      - kuroko-net
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: kuroko-frontend
+  kuroko:
+    image: ghcr.io/<owner>/kuroko:latest
+    container_name: kuroko
     restart: unless-stopped
     ports:
-      - "${PORT:-8080}:80"
-    depends_on:
-      - backend
-    networks:
-      - kuroko-net
-
-networks:
-  kuroko-net:
-    driver: bridge
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - KUROKO_SECRET_KEY=${KUROKO_SECRET_KEY:-change-me-in-production}
 ```
 
-#### Nginx 反代配置参考 (`frontend/nginx.conf`)
-```nginx
-server {
-    listen 80;
-    server_name localhost;
-
-    location / {
-        root /usr/share/nginx/html;
-        index index.html index.htm;
-        try_files $uri $uri/ /index.html;
-    }
-
-    location /api/ {
-        proxy_pass http://backend:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```

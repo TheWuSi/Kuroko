@@ -43,7 +43,8 @@ Kuroko 是基于 OpenList API 的磁力链接番号管理与离线下载系统�
 
 ### 6.3 关键约定
 - **后端分层**：`api/v1/`（路由） → `services/`（业务逻辑） → `models/`（持久化），Schema 定义在 `schemas/`。
-- **前端结构**：`pages/`（页面） + `api/`（请求封装） + `stores/`（Zustand 状态） + `components/ui/`（Shadcn 组件）。
+- **服务入口**：后端统一以 `python -m app.serve` 启动，自动维护 `config/`、`data/`、`logs/` 目录并编排 Uvicorn。
+- **单镜像整合**：根目录 Dockerfile 整合前端静态文件至 `/app/static`，由 `app.core.spa.mount_spa` 统一提供 SPA 路由回退与 API 托管。
 - **外部依赖**：OpenList API 封装在 `services/openlist_client.py`；BT 解析封装在 `services/bt_parser_client.py`。
 - **API 前缀**：所有接口以 `/api/v1` 为前缀，JWT Bearer Token 认证。
 - **构建命令**：`make install` 安装依赖、`make dev-backend` / `make dev-frontend` 启动开发、`make build` 构建生产版。

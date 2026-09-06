@@ -1,31 +1,13 @@
 services:
-  backend:
-    image: ghcr.io/<owner>/kuroko-backend:latest
-    container_name: kuroko-backend
+  kuroko:
+    image: ghcr.io/<owner>/kuroko:latest
+    container_name: kuroko
     restart: unless-stopped
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
+      - ./config:/app/config
       - ./data:/app/data
+      - ./logs:/app/logs
     environment:
       - KUROKO_SECRET_KEY=${KUROKO_SECRET_KEY:-change-me-in-production}
-      - KUROKO_DB_PATH=/app/data/kuroko.db
-    networks:
-      - kuroko
-
-  frontend:
-    image: ghcr.io/<owner>/kuroko-frontend:latest
-    container_name: kuroko-frontend
-    restart: unless-stopped
-    ports:
-      - "${FRONTEND_PORT:-3000}:80"
-    environment:
-      - VITE_API_BASE_URL=http://backend:8000
-    depends_on:
-      - backend
-    networks:
-      - kuroko
-
-networks:
-  kuroko:
-    driver: bridge
