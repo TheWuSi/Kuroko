@@ -10,4 +10,9 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
     environment:
+      - KUROKO_ENVIRONMENT=${KUROKO_ENVIRONMENT:-production}
       - KUROKO_SECRET_KEY=${KUROKO_SECRET_KEY:-change-me-in-production}
+      - KUROKO_PORT=8000
+      - KUROKO_DATABASE_URL=${KUROKO_DATABASE_URL:-sqlite:///./data/kuroko.db}
+      - KUROKO_TASK_POLL_SECONDS=${KUROKO_TASK_POLL_SECONDS:-30}
+      - KUROKO_CORS_ORIGINS=${KUROKO_CORS_ORIGINS:-http://localhost:8000}
