@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { api, apiWithToken } from './api/client'
+import { useAuthStore } from './stores/auth'
+import { useUiStore } from './stores/ui'
+import type { PageId } from './components/layout/Shell'
 
 type User = { id: number; username: string; role: string }
 type Task = {
@@ -27,20 +30,18 @@ const eyebrow = 'mb-2 text-[10px] font-extrabold uppercase tracking-[0.14em] tex
 
 function App() {
   const [initialized, setInitialized] = useState<boolean | null>(null)
-  const [user, setUser] = useState<User | null>(null)
-  const [page, setPage] = useState('dashboard')
-  const [error, setError] = useState('')
+  const { token, user, setSession, clearSession } = useAuthStore()
+  const { page, error, setPage, setError } = useUiStore()
 
   useEffect(() => {
     api<{ initialized: boolean }>('/auth/bootstrap-status')
       .then((data) => setInitialized(data.initialized))
       .catch((err) => setError(err.message))
-    const token = localStorage.getItem('kuroko_token')
     if (token)
       api<User>('/auth/me')
-        .then(setUser)
-        .catch(() => localStorage.removeItem('kuroko_token'))
-  }, [])
+        .then((nextUser) => useAuthStore.setState({ user: nextUser }))
+        .catch(clearSession)
+  }, [clearSession, setError, token])
 
   if (initialized === null)
     return (
@@ -51,8 +52,7 @@ function App() {
       <AuthForm
         bootstrap
         onDone={(token, nextUser) => {
-          localStorage.setItem('kuroko_token', token)
-          setUser(nextUser)
+          setSession(token, nextUser)
           setInitialized(true)
         }}
       />
@@ -61,8 +61,7 @@ function App() {
     return (
       <AuthForm
         onDone={(token, nextUser) => {
-          localStorage.setItem('kuroko_token', token)
-          setUser(nextUser)
+          setSession(token, nextUser)
         }}
       />
     )
@@ -72,8 +71,7 @@ function App() {
       setPage={setPage}
       user={user}
       onLogout={() => {
-        localStorage.removeItem('kuroko_token')
-        setUser(null)
+        clearSession()
       }}
       error={error}
       setError={setError}
@@ -167,14 +165,14 @@ function Shell({
   error,
   setError,
 }: {
-  page: string
-  setPage: (page: string) => void
+  page: PageId
+  setPage: (page: PageId) => void
   user: User
   onLogout: () => void
   error: string
   setError: (error: string) => void
 }) {
-  const nav = [
+  const nav: Array<[PageId, string, string]> = [
     ['dashboard', '总览', '⌂'],
     ['magnets', '磁力解析', '↯'],
     ['tasks', '下载任务', '↓'],
@@ -248,7 +246,7 @@ function Shell({
   )
 }
 
-function Dashboard({ setPage, setError }: { setPage: (page: string) => void; setError: (error: string) => void }) {
+function Dashboard({ setPage, setError }: { setPage: (page: PageId) => void; setError: (error: string) => void }) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [codes, setCodes] = useState(0)
   useEffect(() => {
