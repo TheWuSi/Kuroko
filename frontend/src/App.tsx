@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
+import { api, apiWithToken } from './api/client'
 
-type ApiResult<T> = { code: number; message: string; data: T }
 type User = { id: number; username: string; role: string }
 type Task = {
   task_id: string
@@ -17,21 +17,6 @@ type Config = {
   filter: { allowed_extensions: string[]; min_file_size_mb: number; blacklist_patterns: string[] }
   bt_parser: { service_url: string }
   probe_paths: unknown[]
-}
-
-const api = async <T,>(path: string, options: RequestInit = {}): Promise<T> => {
-  const token = localStorage.getItem('kuroko_token')
-  const response = await fetch(`/api/v1${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers || {}),
-    },
-  })
-  const body = (await response.json()) as ApiResult<T>
-  if (!response.ok || body.code !== 0) throw new Error(body.message || '请求失败')
-  return body.data
 }
 
 const button =
@@ -110,8 +95,7 @@ function AuthForm({ bootstrap = false, onDone }: { bootstrap?: boolean; onDone: 
         method: 'POST',
         body: JSON.stringify({ username, password }),
       })
-      const response = await fetch('/api/v1/auth/me', { headers: { Authorization: `Bearer ${auth.token}` } })
-      const nextUser = ((await response.json()) as ApiResult<User>).data
+      const nextUser = await apiWithToken<User>('/auth/me', auth.token)
       onDone(auth.token, nextUser)
     } catch (err) {
       setError(err instanceof Error ? err.message : '操作失败')
