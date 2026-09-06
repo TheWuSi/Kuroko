@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { bootstrap, getCurrentUser, login } from '../../api/auth'
 import type { User } from '../../types/api'
-import { Alert } from '../ui/Alert'
+import { Notice } from '../ui/Notice'
 import { Field } from '../ui/Field'
 import { button, eyebrow, input } from '../ui/styles'
 
@@ -77,7 +77,7 @@ export function AuthForm({
             />
           </Field>
         )}
-        {error && <Alert tone="error">{error}</Alert>}
+        {error && <Notice tone="error">{error}</Notice>}
         <button className={`${button} mt-6 w-full bg-blue-600 text-white hover:bg-blue-700`} type="submit">
           {isBootstrap ? '完成初始化' : '进入系统'}
         </button>

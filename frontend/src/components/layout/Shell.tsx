@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { User } from '../../types/api'
-import { Alert } from '../ui/Alert'
+import { Notice } from '../ui/Notice'
 import { eyebrow } from '../ui/styles'
 
 export type PageId = 'dashboard' | 'magnets' | 'tasks' | 'codes' | 'storages' | 'settings'
@@ -80,9 +80,9 @@ export function Shell({
           </div>
         </header>
         {error && (
-          <Alert tone="error" onClose={() => setError('')}>
+          <Notice tone="error" onClose={() => setError('')}>
             {error}
-          </Alert>
+          </Notice>
         )}
         {children}
       </main>

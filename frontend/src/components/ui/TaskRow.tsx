@@ -1,4 +1,6 @@
 import type { Task } from '../../types/api'
+import { Badge } from './badge'
+import { Progress } from './progress'
 
 export function TaskRow({ task }: { task: Task }) {
   const badge =
@@ -21,14 +23,10 @@ export function TaskRow({ task }: { task: Task }) {
       </div>
       <div className="w-52 max-[600px]:w-32">
         <div className="mb-2 flex items-center justify-between text-xs">
-          <span className={`rounded px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${badge}`}>
-            {task.status}
-          </span>
+          <Badge className={`uppercase tracking-wide ${badge}`}>{task.status}</Badge>
           <span>{Math.round(progress)}%</span>
         </div>
-        <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
-          <i className="block h-full rounded-full bg-blue-600" style={{ width: `${progress}%` }} />
-        </div>
+        <Progress value={progress} />
       </div>
     </div>
   )

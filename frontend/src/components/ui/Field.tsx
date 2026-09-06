@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react'
+import { Label } from './label'
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="grid gap-2 text-xs font-bold text-slate-600">
+    <Label>
       {label}
       {children}
-    </label>
+    </Label>
   )
 }
