@@ -75,7 +75,7 @@ class SPAMiddleware(BaseHTTPMiddleware):
                     "<html><body style='font-family:sans-serif;padding:40px;line-height:1.6;'>"
                     "<h2>Kuroko 服务运行中</h2>"
                     "<p>前端静态资源未就绪，可访问 <a href='/docs'>/docs</a> 调试 API 接口，"
-                    "或运行 <code>npm run build</code> 构建前端。</p>"
+                    "或运行 <code>pnpm build</code> 构建前端。</p>"
                     "</body></html>",
                     status_code=200,
                 )

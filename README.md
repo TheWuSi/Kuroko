@@ -18,7 +18,7 @@
 | 层级 | 技术 |
 |------|------|
 | 后端 | Python 3.12+, FastAPI, SQLAlchemy, Pydantic |
-| 前端 | React 19, TypeScript, Vite, Shadcn/ui, Zustand |
+| 前端 | React 19, TypeScript, Vite, pnpm, Shadcn/ui, Zustand |
 | 数据库 | SQLite |
 | 构建 | Make |
 | 部署 | Docker, Docker Compose |

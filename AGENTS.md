@@ -32,7 +32,7 @@
 > 以下信息帮助接手本项目的 Agent 快速定位关键资源。
 
 ### 6.1 项目定位
-Kuroko 是基于 OpenList API 的磁力链接番号管理与离线下载系统。后端 **FastAPI**（`backend/`），前端 **React + Shadcn + Zustand**（`frontend/`），构建使用 **Make**，Docker 部署。
+Kuroko 是基于 OpenList API 的磁力链接番号管理与离线下载系统。后端 **FastAPI**（`backend/`），前端 **React + Shadcn + Zustand**（`frontend/`，使用 pnpm），构建使用 **Make**，Docker 部署。
 
 ### 6.2 文档入口
 | 文档 | 路径 | 用途 |

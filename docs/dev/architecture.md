@@ -190,7 +190,7 @@ sequenceDiagram
 ### 3.1 技术选型
 
 - **核心框架**：React 19 + TypeScript
-- **构建工具**：Vite（快速启动与模块热替换）
+- **包管理器与构建工具**：pnpm 10+ 与 Vite（高效硬链接依赖管理与快速模块热替换）
 - **组件库**：Shadcn/ui（基于 Radix UI + Tailwind CSS，现代简约且高可定制）
 - **状态管理**：Zustand（轻量级、无样板代码的全局与会话状态管理）
 - **数据获取与缓存**：TanStack Query（React Query，负责服务端数据拉取、自动重新验证、后台轮询与缓存）
@@ -352,7 +352,7 @@ graph LR
 ### 5.1 镜像构建与容器设计
 
 1. **多阶段 Dockerfile**（项目根目录）：
-   - 阶段 1：Node 22 构建前端 → 生成 `dist/` 静态产物；
+   - 阶段 1：Node 22 + pnpm 构建前端 → 生成 `dist/` 静态产物；
    - 阶段 2：Python 3.12-slim 安装后端依赖，将前端产物复制到 `/app/static`，通过 `mount_spa` 中间件与 FastAPI 深度集成。
 2. **启动命令规范**：
    - 容器 CMD 采用 `python -m app.serve`（参考 Amane 实践），启动时自动完成 `config/`、`data/`、`logs/` 目录权限与生命周期检查，并编排 Uvicorn 优雅停机。

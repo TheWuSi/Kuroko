@@ -1,15 +1,17 @@
 # syntax=docker/dockerfile:1
 # Kuroko - 基于 OpenList API 的磁力链接番号管理与离线下载系统
 
-# --- 阶段 1: 前端构建 ---
+# --- 阶段 1: 前端构建 (使用 pnpm) ---
 FROM node:22-slim AS web-builder
 WORKDIR /app/frontend
 
-COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm ci
+RUN npm install -g pnpm@10
+
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
 COPY frontend/ .
-RUN npm run build
+RUN pnpm build
 
 # --- 阶段 2: 运行镜像 ---
 FROM python:3.12-slim AS base
