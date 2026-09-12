@@ -162,3 +162,4 @@ pnpm dlx shadcn@latest add button
 ```
 
 Components are placed directly into `src/components/ui/` for full code ownership and customization.
+

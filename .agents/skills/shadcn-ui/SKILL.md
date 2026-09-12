@@ -134,3 +134,4 @@ Configuration file located at project root (e.g., `frontend/components.json`):
   pnpm run lint
   pnpm run build
   ```
+
