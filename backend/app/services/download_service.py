@@ -1,122 +1,193 @@
-from pathlib import PurePosixPath
+"""PikPak 离线提交及 OpenList 任务状态同步。"""
+
+import math
 from typing import Any
 
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.code import CodeRecord
 from app.models.storage import StorageGroup
 from app.models.task import DownloadTask, TaskStatus
-from app.services.openlist_client import OpenListClient
-from app.services.storage_service import choose_target, get_client
-from app.utils.code_extractor import extract_code
+from app.services.config_service import get_config
+from app.services.magnet_metadata_client import MagnetMetadataApiClient
+from app.services.openlist_client import OpenListError, nonnegative_int
+from app.services.storage_service import choose_target, get_client, resolve_storage_path, storage_info
+from app.utils.magnet_parser import clean_magnet, magnet_info_hash
+from app.utils.paths import normalize_path
+
+# tache v0.2.2 的真实数字状态；status 字段是描述文本，不能用它判断是否完成。
+STATE_STATUS = {
+    0: TaskStatus.pending.value,
+    1: TaskStatus.downloading.value,
+    2: TaskStatus.completed.value,
+    3: TaskStatus.downloading.value,
+    4: TaskStatus.cancelled.value,
+    5: TaskStatus.pending.value,
+    6: TaskStatus.downloading.value,
+    7: TaskStatus.failed.value,
+    8: TaskStatus.pending.value,
+    9: TaskStatus.pending.value,
+}
+
+
+def normalize_task(remote: dict[str, Any]) -> dict[str, Any]:
+    state = remote.get("state")
+    if not isinstance(state, int) or isinstance(state, bool) or state not in STATE_STATUS:
+        raise OpenListError("OpenList 返回了无法识别的任务状态")
+    progress = remote.get("progress")
+    if not isinstance(progress, (float, int)) or isinstance(progress, bool) or not math.isfinite(progress):
+        raise OpenListError("OpenList 返回了无效的任务进度")
+    progress = 100.0 if state == 2 else min(100.0, max(0.0, float(progress)))
+    total = nonnegative_int(remote.get("total_bytes"))
+    if total is None:
+        raise OpenListError("OpenList 返回了无效的任务大小")
+    return {
+        "status": STATE_STATUS[state], "progress": progress, "total_size": total,
+        "downloaded_size": int(total * progress / 100),
+        "error_message": remote.get("error") or None,
+        "state": state, "status_detail": remote.get("status") or "",
+    }
+
+
+def _find_group(db: Session, target: str | int | None) -> StorageGroup:
+    query = db.query(StorageGroup)
+    if isinstance(target, int) or (isinstance(target, str) and target.isdigit()):
+        group = query.filter(StorageGroup.id == int(target)).first()
+    elif target:
+        group = query.filter(StorageGroup.name == target).first()
+    else:
+        group = query.order_by(StorageGroup.id).first()
+    if group is None:
+        raise ValueError("未找到目标存储分组，请指定下载目录或创建分组")
+    return group
 
 
 def submit_batch(db: Session, tasks: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    submitted, skipped = [], []
-    for item in tasks:
-        existing = db.query(CodeRecord).filter(CodeRecord.code == item["code"]).first()
-        if existing and not item.get("force", False):
-            skipped.append({"code": item["code"], "reason": "already_exists", "existing_location": f"{existing.storage_path}/{existing.file_name}"})
-            continue
-        group_query = db.query(StorageGroup)
-        target_group = item.get("target_group")
-        group = group_query.filter(StorageGroup.id == int(target_group)).first() if isinstance(target_group, int) or (isinstance(target_group, str) and target_group.isdigit()) else group_query.filter(StorageGroup.name == target_group).first() if target_group else group_query.first()
-        if group is None:
-            raise ValueError("未找到目标存储分组")
-        target_root, _ = choose_target(db, group, int(item.get("total_size", 0)))
-        # 每个任务使用独立番号目录，避免同一挂载点的离线任务互相覆盖。
-        target_path = str(PurePosixPath(target_root) / item["code"])
-        client: OpenListClient = get_client(db)
-        openlist_task_id = client.add_offline_download(item["magnet"], target_path)
-        task = DownloadTask(code=item["code"], magnet=item["magnet"], target_path=target_path, openlist_task_id=openlist_task_id, total_size=int(item.get("total_size", 0)))
-        db.add(task)
-        db.flush()
-        submitted.append({"code": task.code, "task_id": task.task_id, "target_path": task.target_path, "openlist_task_id": openlist_task_id})
-    db.commit()
-    return {"submitted": submitted, "skipped": skipped}
+    submitted, skipped, failed = [], [], []
+    config = get_config(db, masked=False)["bt_parser"]
+    mounts = infos = None
+    metadata_cache: dict[str, dict[str, Any]] = {}
+    checked_paths: set[str] = set()
+    reserved: dict[str, int] = {}
+    with get_client(db) as client, MagnetMetadataApiClient(
+        config["service_url"], config["token"], config["timeout_seconds"],
+    ) as parser:
+        for index, item in enumerate(tasks):
+            task: DownloadTask | None = None
+            try:
+                magnet = clean_magnet(item["magnet"])
+                code = item["code"]
+                existing = db.query(CodeRecord).filter(CodeRecord.code == code).first()
+                if existing and not item.get("force", False):
+                    skipped.append({
+                        "index": index, "code": code, "magnet": magnet, "reason": "already_exists",
+                        "existing_location": f"{existing.storage_path}/{existing.file_name}",
+                    })
+                    continue
+                if mounts is None:
+                    mounts = client.get_storage_info()
+                info_hash = magnet_info_hash(magnet)
+                if info_hash not in metadata_cache:
+                    metadata_cache[info_hash] = parser.parse_with_fallback(magnet)
+                metadata = metadata_cache[info_hash]
+                size = metadata["size"]
+                if item.get("target_path"):
+                    target = normalize_path(item["target_path"])
+                else:
+                    if infos is None:
+                        infos = storage_info(db, client=client, remote=mounts)
+                    target, _ = choose_target(
+                        db, _find_group(db, item.get("target_group")), size, infos=infos, reserved=reserved,
+                    )
+                storage, _ = resolve_storage_path(target, mounts)
+                if storage["status"] != "work":
+                    raise ValueError("目标存储当前不可用")
+                active = db.query(DownloadTask).filter(
+                    DownloadTask.magnet == magnet, DownloadTask.target_path == target,
+                    DownloadTask.status.in_([TaskStatus.pending.value, TaskStatus.downloading.value]),
+                ).first()
+                if active:
+                    skipped.append({
+                        "index": index, "code": code, "magnet": magnet, "reason": "already_submitted",
+                        "existing_location": target, "task_id": active.task_id,
+                    })
+                    continue
+                if target not in checked_paths:
+                    try:
+                        destination = client.get_file(target)
+                        if not destination["is_dir"]:
+                            raise ValueError("下载目标必须是目录")
+                    except OpenListError as exc:
+                        # 新目录由 OpenList 创建，Kuroko 不额外添加任何目录层级。
+                        if exc.code != 404:
+                            raise
+                    if "PikPak" not in client.get_offline_tools(target):
+                        raise ValueError("OpenList 未启用 PikPak 离线工具，请检查 PikPak 挂载和离线临时目录")
+                    checked_paths.add(target)
+                task = DownloadTask(code=code, magnet=magnet, target_path=target, total_size=size)
+                db.add(task)
+                # 先确认本地能够保存任务，再执行不可回滚的上游提交；各条任务单独提交事务。
+                db.commit()
+                task.openlist_task_id = client.add_offline_download(magnet, target)
+                db.commit()
+                reserved[storage["mount_path"]] = reserved.get(storage["mount_path"], 0) + size
+                submitted.append({
+                    "index": index, "code": code, "magnet": magnet, "task_id": task.task_id,
+                    "target_path": target, "openlist_task_id": task.openlist_task_id,
+                    "total_size": size, "metadata_fallback": metadata["metadata_fallback"],
+                })
+            except (OpenListError, ValueError) as exc:
+                if task is not None:
+                    task.status = TaskStatus.failed.value
+                    task.error_message = str(exc)
+                    db.commit()
+                failed.append({
+                    "index": index, "code": item["code"], "magnet": item["magnet"],
+                    "task_id": task.task_id if task else None, "message": str(exc),
+                    "reason": "submission_unknown" if isinstance(exc, OpenListError) and exc.outcome_unknown
+                    else "upstream_error" if isinstance(exc, OpenListError) else "invalid_target",
+                })
+    return {"submitted": submitted, "skipped": skipped, "failed": failed}
 
 
-def _as_int(value: Any, default: int = 0) -> int:
-    try:
-        return max(0, int(float(value)))
-    except (TypeError, ValueError):
-        return default
-
-
-def _task_files(item: dict[str, Any], task: DownloadTask) -> list[dict[str, Any]]:
-    """从 OpenList 任务元数据提取已落盘文件，兼容不同版本字段。"""
-    candidates = item.get("files") or item.get("content") or item.get("file_list") or []
-    if isinstance(candidates, dict):
-        candidates = candidates.get("files") or candidates.get("content") or []
-    if not isinstance(candidates, list):
-        candidates = []
-    files: list[dict[str, Any]] = []
-    for raw in candidates:
-        if isinstance(raw, str):
-            files.append({"name": raw, "size": task.total_size})
-            continue
-        if not isinstance(raw, dict):
-            continue
-        name = raw.get("path") or raw.get("full_path") or raw.get("name") or raw.get("file_name")
-        if name:
-            files.append({"name": str(name), "size": _as_int(raw.get("size") or raw.get("length"), task.total_size)})
-    if files:
-        return files
-    path = item.get("path") or item.get("save_path") or item.get("target_path")
-    name = item.get("name") or item.get("file_name")
-    if path and name:
-        return [{"name": str(PurePosixPath(str(path)) / str(name)), "size": task.total_size}]
-    # 某些 OpenList 版本只返回任务状态。仍然保存任务番号，避免完成事件丢失。
-    return [{"name": str(PurePosixPath(task.target_path) / task.code), "size": task.total_size}]
-
-
-def _record_completed_task(db: Session, task: DownloadTask, remote: dict[str, Any]) -> None:
-    """完成事件只写入一次，避免后台轮询产生重复番号记录。"""
-    for file in _task_files(remote, task):
-        name = str(file["name"])
-        path = str(PurePosixPath(name).parent)
-        file_name = PurePosixPath(name).name
-        code = extract_code(file_name) or task.code
-        exists = db.query(CodeRecord).filter(
-            CodeRecord.code == code,
-            CodeRecord.storage_path == path,
-            CodeRecord.file_name == file_name,
-        ).first()
-        if exists:
-            continue
-        try:
-            with db.begin_nested():
-                db.add(CodeRecord(code=code, storage_path=path, file_name=file_name, file_size=_as_int(file.get("size")), source="download"))
-                db.flush()
-        except IntegrityError:
-            # 并发轮询时另一事务可能已先写入，幂等地忽略冲突。
-            continue
+def apply_remote_task(task: DownloadTask, remote: dict[str, Any]) -> None:
+    data = normalize_task(remote)
+    task.status = data["status"]
+    task.progress = data["progress"]
+    if data["total_size"] > 0:
+        task.total_size = data["total_size"]
+    task.downloaded_size = int(task.total_size * task.progress / 100)
+    # OpenList TaskInfo 没有独立速率字段，不从描述文本中猜测或沿用陈旧值。
+    task.speed = None
+    task.error_message = data["error_message"]
+    if data["state"] == 3:
+        task.error_message = "取消请求已提交，等待 OpenList 确认"
 
 
 def sync_tasks(db: Session) -> list[DownloadTask]:
-    tasks = db.query(DownloadTask).filter(DownloadTask.status.in_([TaskStatus.pending.value, TaskStatus.downloading.value])).all()
+    tasks = db.query(DownloadTask).filter(
+        DownloadTask.status.in_([TaskStatus.pending.value, TaskStatus.downloading.value]),
+        DownloadTask.openlist_task_id.is_not(None),
+    ).all()
     if not tasks:
         return []
-    remote = get_client(db).get_offline_tasks([task.openlist_task_id for task in tasks if task.openlist_task_id])
-    by_id = {str(item.get("id") or item.get("task_id")): item for item in remote}
-    completed: list[DownloadTask] = []
-    for task in tasks:
-        item = by_id.get(str(task.openlist_task_id))
-        if not item:
-            continue
-        status = str(item.get("status") or item.get("state") or "downloading").lower()
-        task.status = TaskStatus.completed.value if status in {"success", "completed", "complete", "finished", "done"} else TaskStatus.failed.value if status in {"error", "failed", "failure", "cancelled"} else TaskStatus.downloading.value
-        try:
-            task.progress = min(100.0, max(0.0, float(item.get("progress", item.get("percent", task.progress)))))
-        except (TypeError, ValueError):
-            task.progress = task.progress
-        task.speed = str(item.get("speed")) if item.get("speed") is not None else task.speed
-        task.downloaded_size = _as_int(item.get("downloaded_size") or item.get("downloaded") or task.downloaded_size, task.downloaded_size)
-        task.error_message = item.get("error") or item.get("error_message")
-        if task.status == TaskStatus.completed.value:
-            task.progress = 100.0
-            _record_completed_task(db, task, item)
-            completed.append(task)
-    db.commit()
-    return completed
+    updated = []
+    with get_client(db) as client:
+        remote = client.get_offline_tasks([task.openlist_task_id for task in tasks])
+        by_id = {item["id"]: item for item in remote}
+        for task in tasks:
+            item = by_id.get(task.openlist_task_id)
+            if item is None:
+                try:
+                    item = client.get_task(task.openlist_task_id)
+                except OpenListError as exc:
+                    if exc.code != 404:
+                        raise
+                    task.error_message = "OpenList 暂未找到该任务，请检查任务是否已被清理"
+                    updated.append(task)
+                    continue
+            apply_remote_task(task, item)
+            # 离线任务成功不代表独立转存任务已完成，番号库只接受实际扫描出的文件。
+            updated.append(task)
+        db.commit()
+    return updated

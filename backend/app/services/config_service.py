@@ -22,7 +22,9 @@ def _get_raw(db: Session, key: str) -> Any:
     if row:
         try:
             value = json.loads(row.value)
-            return value if isinstance(value, (dict, list)) else deepcopy(DEFAULTS[key])
+            if isinstance(DEFAULTS[key], dict) and isinstance(value, dict):
+                return {**deepcopy(DEFAULTS[key]), **value}
+            return value if isinstance(value, list) and isinstance(DEFAULTS[key], list) else deepcopy(DEFAULTS[key])
         except (TypeError, ValueError):
             return deepcopy(DEFAULTS[key])
     defaults = deepcopy(DEFAULTS[key])
@@ -41,8 +43,18 @@ def get_config(db: Session, *, masked: bool = True) -> dict[str, Any]:
         for section, fields in (("openlist", ("password", "token")), ("bt_parser", ("token",))):
             for field in fields:
                 value = data[section].get(field, "")
-                data[section][field] = "" if not value else f"{value[:2]}****{value[-2:]}" if len(value) > 4 else "****"
+                data[section][field] = "****" if value else ""
     return data
+
+
+def merge_section(current: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    merged = {**current, **patch}
+    for field in ("password", "token"):
+        previous = current.get(field) or ""
+        legacy_mask = f"{previous[:2]}****{previous[-2:]}" if len(previous) > 4 else "****"
+        if patch.get(field) in {"****", legacy_mask}:
+            merged[field] = previous
+    return merged
 
 
 def update_config(db: Session, patch: dict[str, Any]) -> dict[str, Any]:
@@ -52,11 +64,7 @@ def update_config(db: Session, patch: dict[str, Any]) -> dict[str, Any]:
             continue
         value = dict(value) if hasattr(value, "items") else value
         if isinstance(value, dict):
-            merged = {**current.get(section, {}), **value}
-            for secret_field in ("password", "token"):
-                if merged.get(secret_field, "").startswith("**") or "****" in merged.get(secret_field, ""):
-                    merged[secret_field] = current.get(section, {}).get(secret_field, "")
-            current[section] = merged
+            current[section] = merge_section(current.get(section, {}), value)
         else:
             current[section] = value
         row = db.query(SystemConfig).filter(SystemConfig.key == section).one_or_none()

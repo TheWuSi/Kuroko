@@ -1,119 +1,153 @@
-"""magnet-metadata-api 的 HTTP 适配器。
+"""magnet-metadata-api 的协议适配、健康检查和可区分原因的降级。"""
 
-上游服务负责 DHT/Peer 元数据获取，本模块只处理协议、超时和结果形状，
-这样磁力业务层可以在上游暂不可用时继续使用 dn 做保底识别。
-"""
-
-from __future__ import annotations
-
+import time
 from typing import Any
-from urllib.parse import urljoin
 
 import httpx
+from pydantic import BaseModel, Field, StrictInt, ValidationError, field_validator
 
-from app.utils.magnet_parser import magnet_display_name
+from app.schemas.config import validate_optional_url
+from app.utils.magnet_parser import clean_magnet, magnet_display_name, magnet_info_hash
+
+MAX_BYTES = 2**63 - 1
+
+
+def _relative_path(value: str) -> str:
+    if (
+        not value or len(value) > 4096 or value.startswith("/") or "\\" in value
+        or any(part in {"", ".", ".."} for part in value.split("/"))
+        or any(ord(char) < 32 or ord(char) == 127 for char in value)
+    ):
+        raise ValueError("无效的种子相对路径")
+    return value
+
+
+class MetadataFile(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    size: StrictInt = Field(ge=0, le=MAX_BYTES)
+    offset: StrictInt = Field(0, ge=0, le=MAX_BYTES)
+
+    _path = field_validator("path")(_relative_path)
+
+
+class MetadataPayload(BaseModel):
+    info_hash: str = Field(pattern=r"^[0-9a-fA-F]{40}$")
+    name: str = Field(min_length=1, max_length=1024)
+    size: StrictInt = Field(ge=0, le=MAX_BYTES)
+    files: list[MetadataFile] = Field(default_factory=list, max_length=100000)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        if "/" in value:
+            raise ValueError("种子名称不可包含目录分隔符")
+        return _relative_path(value)
 
 
 class MagnetMetadataError(RuntimeError):
-    """元数据服务不可用或返回了无效结果。"""
+    def __init__(self, message: str, *, reason: str = "bt_metadata_unavailable"):
+        super().__init__(message)
+        self.reason = reason
 
 
 class MagnetMetadataApiClient:
-    def __init__(self, service_url: str, token: str = "", timeout: float = 45.0):
-        self.service_url = service_url.strip().rstrip("/")
+    def __init__(
+        self, service_url: str, token: str = "", timeout: float = 45.0,
+        *, transport: httpx.BaseTransport | None = None,
+    ):
+        self.service_url = validate_optional_url(service_url, "BT 解析服务地址")
         self.token = token or ""
         self.timeout = max(1.0, min(float(timeout), 300.0))
+        if any(ord(char) < 32 or ord(char) == 127 for char in self.token):
+            raise MagnetMetadataError("解析服务令牌包含无效字符")
+        self.http = httpx.Client(timeout=httpx.Timeout(self.timeout, connect=min(10, self.timeout)), transport=transport)
 
-    def _headers(self) -> dict[str, str]:
-        headers = {"Content-Type": "application/json"}
-        if self.token:
-            headers["Authorization"] = self.token if self.token.lower().startswith("bearer ") else f"Bearer {self.token}"
-        return headers
+    def __enter__(self):
+        return self
 
-    def _url(self, path: str) -> str:
+    def __exit__(self, *_):
+        self.close()
+
+    def close(self) -> None:
+        self.http.close()
+
+    def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         if not self.service_url:
             raise MagnetMetadataError("未配置 magnet-metadata-api 地址")
-        return urljoin(f"{self.service_url}/", path.lstrip("/"))
+        headers = {}
+        # 上游没有内建鉴权；仅为部署在 Bearer 认证代理后的实例保留可选令牌。
+        if self.token:
+            headers["Authorization"] = self.token if self.token.lower().startswith("bearer ") else f"Bearer {self.token}"
+        try:
+            response = self.http.request(method, f"{self.service_url}{path}", headers=headers, **kwargs)
+        except httpx.TimeoutException as exc:
+            raise MagnetMetadataError("磁力元数据服务请求超时", reason="bt_metadata_timeout") from exc
+        except httpx.HTTPError as exc:
+            raise MagnetMetadataError("磁力元数据服务连接失败") from exc
+        if response.status_code in {408, 504}:
+            raise MagnetMetadataError("磁力元数据服务解析超时", reason="bt_metadata_timeout")
+        if response.status_code == 400:
+            raise MagnetMetadataError("磁力元数据服务拒绝了该磁力链接", reason="bt_metadata_invalid_request")
+        if not 200 <= response.status_code < 300:
+            raise MagnetMetadataError(f"磁力元数据服务请求失败（HTTP {response.status_code}）")
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise MagnetMetadataError("磁力元数据服务未返回有效 JSON", reason="bt_metadata_invalid_response") from exc
 
     def fetch_metadata(self, magnet_uri: str) -> dict[str, Any]:
-        """请求 DHT 元数据并归一化文件字段。
-
-        不在这里吞掉异常，调用方可据异常原因决定是否降级；这样健康检查
-        与业务解析不会把网络故障误报成空文件列表。
-        """
+        magnet_uri = clean_magnet(magnet_uri)
+        payload = self._request("POST", "/api/v1/metadata", json={"magnet_uri": magnet_uri})
         try:
-            response = httpx.request(
-                "POST",
-                self._url("/api/v1/metadata"),
-                headers=self._headers(),
-                json={"magnet_uri": magnet_uri},
-                timeout=self.timeout,
-            )
-            response.raise_for_status()
-            payload = response.json()
-        except (httpx.HTTPError, ValueError, MagnetMetadataError) as exc:
-            if isinstance(exc, MagnetMetadataError):
-                raise
-            raise MagnetMetadataError("磁力元数据服务请求失败") from exc
-        if not isinstance(payload, dict):
-            raise MagnetMetadataError("磁力元数据服务返回格式无效")
-        files = payload.get("files") or []
-        if not isinstance(files, list):
-            files = []
-        normalized: list[dict[str, Any]] = []
-        for item in files:
-            if not isinstance(item, dict):
-                continue
-            path = item.get("path") or item.get("name")
-            if not path:
-                continue
-            try:
-                size = max(0, int(item.get("size") or item.get("length") or 0))
-            except (TypeError, ValueError):
-                size = 0
-            normalized.append({"name": str(path), "path": str(path), "size": size, "offset": item.get("offset", 0)})
-        try:
-            total_size = max(0, int(payload.get("size") or sum(item["size"] for item in normalized)))
-        except (TypeError, ValueError):
-            total_size = sum(item["size"] for item in normalized)
+            metadata = MetadataPayload.model_validate(payload)
+            if metadata.info_hash.lower() != magnet_info_hash(magnet_uri):
+                raise ValueError("响应 Hash 不匹配")
+            files = metadata.files
+            # 单文件种子的 Go info.Files 为空，实际文件由 name 和 size 表达。
+            if not files:
+                files = [MetadataFile(path=metadata.name, size=metadata.size)]
+            if sum(file.size for file in files) != metadata.size or len({file.path for file in files}) != len(files):
+                raise ValueError("文件清单与总大小不一致")
+            if any(file.offset + file.size > metadata.size for file in files):
+                raise ValueError("文件偏移超出种子范围")
+        except (ValidationError, ValueError) as exc:
+            raise MagnetMetadataError("磁力元数据服务返回格式无效", reason="bt_metadata_invalid_response") from exc
         return {
-            "info_hash": str(payload.get("info_hash") or ""),
-            "name": str(payload.get("name") or ""),
-            "size": total_size,
-            "files": normalized,
+            "info_hash": metadata.info_hash.lower(), "name": metadata.name, "size": metadata.size,
+            "files": [{"name": file.path, **file.model_dump()} for file in files],
             "metadata_fallback": False,
         }
 
-    # 兼容旧 BtParserClient 的调用命名，便于外部插件平滑升级。
     def parse(self, magnet_uri: str) -> dict[str, Any]:
         return self.fetch_metadata(magnet_uri)
 
     def parse_with_fallback(self, magnet_uri: str) -> dict[str, Any]:
+        magnet_uri = clean_magnet(magnet_uri)
         try:
             return self.fetch_metadata(magnet_uri)
         except MagnetMetadataError as exc:
             return {
-                "info_hash": "",
-                "name": magnet_display_name(magnet_uri),
-                "size": 0,
-                "files": [],
-                "metadata_fallback": True,
-                "fallback": True,
-                "fallback_reason": "bt_metadata_timeout" if isinstance(exc.__cause__, httpx.TimeoutException) else "bt_metadata_unavailable",
+                "info_hash": magnet_info_hash(magnet_uri), "name": magnet_display_name(magnet_uri),
+                "size": 0, "files": [], "metadata_fallback": True, "fallback": True,
+                "fallback_reason": exc.reason,
             }
 
     def test_connection(self) -> dict[str, Any]:
-        """执行轻量健康检查并返回耗时，不发送用户磁力内容。"""
-        import time
-
         started = time.perf_counter()
-        try:
-            response = httpx.request("GET", self._url("/health"), headers=self._headers(), timeout=min(self.timeout, 10.0))
-            response.raise_for_status()
-        except (httpx.HTTPError, MagnetMetadataError) as exc:
-            raise MagnetMetadataError("magnet-metadata-api 连接失败") from exc
-        return {"connected": True, "latency_ms": round((time.perf_counter() - started) * 1000, 1)}
+        payload = self._request("GET", "/api/v1/health", timeout=min(self.timeout, 10))
+        if not isinstance(payload, dict) or payload.get("status") != "ok" or not isinstance(payload.get("stats"), dict):
+            raise MagnetMetadataError("magnet-metadata-api 健康检查失败", reason="bt_metadata_invalid_response")
+        stats = {}
+        for key in ("active_torrents", "active_locks", "dlq_entries", "active_itorrents_requests"):
+            if key in payload["stats"]:
+                value = payload["stats"][key]
+                if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= MAX_BYTES:
+                    raise MagnetMetadataError("magnet-metadata-api 健康数据无效", reason="bt_metadata_invalid_response")
+                stats[key] = value
+        return {
+            "connected": True, "service_name": "magnet-metadata-api", "stats": stats,
+            "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+        }
 
 
-# 计划文档使用的名称，保留简短别名方便导入。
 MagnetMetadataClient = MagnetMetadataApiClient

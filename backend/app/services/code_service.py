@@ -22,6 +22,7 @@ from app.services.config_service import get_config
 from app.services.magnet_service import filter_files
 from app.services.storage_service import get_client
 from app.utils.code_extractor import extract_code
+from app.utils.paths import child_path, is_within, join_path, normalize_path
 
 scan_lock = threading.Lock()
 
@@ -73,7 +74,10 @@ def _groups_for_job(db: Session, job: ScanJob, config: dict[str, Any]) -> list[d
 
 def _walk_probe(client: Any, root: str):
     """只在配置探测根内递归，并对路径做规范化去重。"""
-    pending = [str(PurePosixPath(root))]
+    root = normalize_path(root)
+    if root == "/":
+        raise ValueError("请配置具体探测目录，不可扫描 OpenList 根目录")
+    pending = [root]
     visited: set[str] = set()
     while pending:
         current = str(PurePosixPath(pending.pop()))
@@ -83,17 +87,10 @@ def _walk_probe(client: Any, root: str):
         for entry in client.list_files(current):
             if not isinstance(entry, dict):
                 continue
-            name = str(entry.get("name") or entry.get("path") or "").strip()
-            if not name:
-                continue
-            is_dir = bool(
-                entry.get("is_dir")
-                or entry.get("isDir")
-                or entry.get("directory")
-                or str(entry.get("type", "")).lower() in {"dir", "directory", "folder"}
-            )
-            full_path = name if name.startswith("/") else str(PurePosixPath(current) / name)
-            if is_dir:
+            full_path = child_path(current, entry["name"])
+            if not is_within(full_path, root):
+                raise ValueError("扫描路径超出了探测目录")
+            if entry["is_dir"]:
                 pending.append(full_path)
             else:
                 yield {**entry, "name": full_path}
@@ -103,6 +100,7 @@ def run_scan(task_id: str) -> None:
     if not scan_lock.acquire(blocking=False):
         return
     db = SessionLocal()
+    client = None
     try:
         job = db.query(ScanJob).filter(ScanJob.task_id == task_id).first()
         if not job:
@@ -120,7 +118,7 @@ def run_scan(task_id: str) -> None:
                 folder = str(probe.get("folder", "/"))
                 if not mount.startswith("/") or ".." in mount.split("/") or ".." in folder.split("/"):
                     continue
-                root = str(PurePosixPath(mount) / folder.lstrip("/"))
+                root = join_path(mount, folder)
                 job.current_path = root
                 for file in _walk_probe(client, root):
                     job.scanned_files += 1
@@ -153,5 +151,7 @@ def run_scan(task_id: str) -> None:
             job.completed_at = datetime.now(UTC)
             db.commit()
     finally:
+        if client is not None:
+            client.close()
         db.close()
         scan_lock.release()

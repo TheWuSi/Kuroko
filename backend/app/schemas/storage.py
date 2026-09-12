@@ -2,19 +2,18 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.utils.paths import normalize_path
+
 
 def clean_paths(paths: list[str]) -> list[str]:
     normalized = []
     for value in paths:
-        value = value.strip()
-        if not value.startswith("/") or ".." in value.split("/"):
-            raise ValueError("存储路径必须为绝对路径且不可包含 ..")
-        normalized.append(value.rstrip("/") or "/")
+        normalized.append(normalize_path(value.strip()))
     return list(dict.fromkeys(normalized))
 
 
 class SpaceOverrideRequest(BaseModel):
-    total_space_bytes: int = Field(gt=0)
+    total_space_bytes: int = Field(gt=0, le=2**63 - 1)
 
 
 class StorageGroupRequest(BaseModel):

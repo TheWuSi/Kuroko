@@ -5,11 +5,10 @@ from pydantic import SecretStr
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.responses import success
+from app.core.responses import ApiError, success
 from app.core.security import get_current_user
-from app.models.user import User
-from app.schemas.config import ConfigPatch, ConnectionTestRequest
-from app.services.config_service import get_config, update_config
+from app.schemas.config import BtParserConfig, ConfigPatch, ConnectionTestRequest
+from app.services.config_service import get_config, merge_section, update_config
 from app.services.magnet_metadata_client import MagnetMetadataApiClient, MagnetMetadataError
 from app.services.openlist_client import OpenListClient, OpenListError
 
@@ -34,23 +33,28 @@ def read_config(db: Session = Depends(get_db)):
 
 @router.put("")
 def write_config(payload: ConfigPatch, db: Session = Depends(get_db)):
-    return success(update_config(db, _plain_secrets(payload.model_dump(exclude_none=True))))
+    return success(update_config(db, _plain_secrets(payload.model_dump(exclude_none=True, exclude_unset=True))))
 
 
 @router.post("/test-connection")
 def test_connection(payload: ConnectionTestRequest | None = None, db: Session = Depends(get_db)):
-    config: dict[str, Any] = _plain_secrets(payload.model_dump(exclude_none=True)) if payload else get_config(db, masked=False)["openlist"]
+    current = get_config(db, masked=False)["openlist"]
+    patch = _plain_secrets(payload.model_dump(exclude_none=True, exclude_unset=True)) if payload else {}
+    config = merge_section(current, patch)
     try:
-        return success(OpenListClient(config).test_connection())
+        with OpenListClient(config) as client:
+            return success(client.test_connection())
     except OpenListError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.post("/test-bt-parser")
-def test_bt_parser(db: Session = Depends(get_db)):
-    config = get_config(db, masked=False)["bt_parser"]
-    client = MagnetMetadataApiClient(config.get("service_url", ""), config.get("token", ""), config.get("timeout_seconds", 45))
+def test_bt_parser(payload: BtParserConfig | None = None, db: Session = Depends(get_db)):
+    current = get_config(db, masked=False)["bt_parser"]
+    patch = _plain_secrets(payload.model_dump(exclude_none=True, exclude_unset=True)) if payload else {}
+    config = merge_section(current, patch)
     try:
-        return success(client.test_connection())
+        with MagnetMetadataApiClient(config["service_url"], config["token"], config["timeout_seconds"]) as client:
+            return success(client.test_connection())
     except MagnetMetadataError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise ApiError(502, 50202, str(exc)) from exc

@@ -1,6 +1,7 @@
 """FastAPI 应用入口。"""
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -12,21 +13,25 @@ from app.api.v1.router import router as api_router
 from app.core.config import get_settings
 from app.core.database import ensure_runtime_dirs, init_db
 from app.core.spa import mount_spa
+from app.core.responses import ApiError
 from app.services.download_service import sync_tasks
 from app.core.database import SessionLocal
 from app.services.code_service import recover_orphaned_scans
 
 
+def _sync_in_worker() -> None:
+    try:
+        with SessionLocal() as db:
+            sync_tasks(db)
+    except Exception as exc:
+        logging.getLogger(__name__).warning("OpenList 任务同步未完成：%s", type(exc).__name__)
+
+
 async def _task_poller() -> None:
     while True:
-        await asyncio.sleep(get_settings().task_poll_seconds)
-        db = SessionLocal()
-        try:
-            sync_tasks(db)
-        except Exception:
-            pass
-        finally:
-            db.close()
+        await asyncio.sleep(max(1, get_settings().task_poll_seconds))
+        # 同步 HTTP 与 SQLite 工作放入工作线程，避免阻塞登录、健康检查等异步请求。
+        await asyncio.to_thread(_sync_in_worker)
 
 
 @asynccontextmanager
@@ -71,12 +76,15 @@ app.add_middleware(
 @app.exception_handler(HTTPException)
 async def http_error(_: Request, exc: HTTPException):
     code_map = {400: 40001, 401: 40102, 403: 40301, 404: 40401, 409: 40901, 502: 50201}
-    return JSONResponse(status_code=exc.status_code, content={"code": code_map.get(exc.status_code, 50001), "message": str(exc.detail), "data": None})
+    code = exc.code if isinstance(exc, ApiError) else code_map.get(exc.status_code, 50001)
+    return JSONResponse(status_code=exc.status_code, content={"code": code, "message": str(exc.detail), "data": None})
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(_: Request, exc: RequestValidationError):
-    return JSONResponse(status_code=422, content={"code": 40001, "message": "参数校验失败", "data": exc.errors()})
+    # Pydantic 的 input/ctx 可能含账号口令或不可序列化的异常对象，不对外返回。
+    details = [{"loc": item["loc"], "type": item["type"]} for item in exc.errors()]
+    return JSONResponse(status_code=422, content={"code": 40001, "message": "参数校验失败", "data": details})
 
 
 @app.get("/api/v1/health", tags=["System"])

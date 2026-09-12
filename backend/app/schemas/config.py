@@ -3,13 +3,28 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, SecretStr, field_validator
 
+from app.utils.paths import normalize_path
+
 
 def validate_optional_url(value: str, field_name: str) -> str:
     value = value.strip()
     if not value:
         return value
-    parsed = urlsplit(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc or any(char.isspace() for char in value):
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"{field_name} 必须是有效的 http/https URL") from exc
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or (port is not None and not 1 <= port <= 65535)
+        or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value)
+    ):
         raise ValueError(f"{field_name} 必须是 http/https URL")
     return value.rstrip("/")
 
@@ -17,9 +32,16 @@ def validate_optional_url(value: str, field_name: str) -> str:
 class OpenListConfig(BaseModel):
     base_url: str = Field("", max_length=512)
     auth_type: str = Field("token", pattern="^(token|password)$")
-    username: str = ""
-    password: SecretStr | None = None
-    token: SecretStr | None = None
+    username: str = Field("", max_length=256)
+    password: SecretStr | None = Field(None, max_length=1024)
+    token: SecretStr | None = Field(None, max_length=8192)
+
+    @field_validator("token")
+    @classmethod
+    def validate_token(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and any(ord(char) < 32 or ord(char) == 127 for char in value.get_secret_value()):
+            raise ValueError("令牌不可包含控制字符")
+        return value
 
     @field_validator("base_url")
     @classmethod
@@ -72,7 +94,7 @@ class FilterConfig(BaseModel):
 
 class BtParserConfig(BaseModel):
     service_url: str = Field("", max_length=512)
-    token: SecretStr | None = None
+    token: SecretStr | None = Field(None, max_length=8192)
     timeout_seconds: int = Field(45, ge=1, le=300)
 
     @field_validator("service_url")
@@ -80,22 +102,26 @@ class BtParserConfig(BaseModel):
     def validate_service_url(cls, value: str) -> str:
         return validate_optional_url(value, "BT 解析服务地址")
 
+    _token = field_validator("token")(OpenListConfig.validate_token.__func__)
+
 
 class ProbePath(BaseModel):
     storage_mount: str = Field(min_length=1, max_length=255)
     folder: str = Field("/", min_length=1, max_length=1024)
 
+    _paths = field_validator("storage_mount", "folder")(normalize_path)
+
 
 class ProbeGroup(BaseModel):
-    group_name: str
-    paths: list[ProbePath] = Field(min_length=1)
+    group_name: str = Field(min_length=1, max_length=100)
+    paths: list[ProbePath] = Field(min_length=1, max_length=100)
 
 
 class ConfigPatch(BaseModel):
     openlist: OpenListConfig | None = None
     filter: FilterConfig | None = None
     bt_parser: BtParserConfig | None = None
-    probe_paths: list[ProbeGroup] | None = None
+    probe_paths: list[ProbeGroup] | None = Field(None, max_length=100)
 
 
 class ConnectionTestRequest(OpenListConfig):

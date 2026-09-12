@@ -12,15 +12,25 @@ def test_password_hash_round_trip() -> None:
 
 
 def test_magnet_cleaner_keeps_only_identity_fields() -> None:
-    cleaned = clean_magnet("magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef&dn=ABC-123&tr=https://tracker.invalid")
+    cleaned = clean_magnet("magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=ABC-123&tr=https://tracker.invalid")
     assert cleaned.startswith("magnet:?")
-    assert "xt=urn%3Abtih%3A0123456789abcdef0123456789abcdef" in cleaned
+    assert "xt=urn%3Abtih%3A0123456789abcdef0123456789abcdef01234567" in cleaned
     assert "tr=" not in cleaned
 
 
 def test_magnet_cleaner_rejects_invalid_hash() -> None:
     with pytest.raises(ValueError):
         clean_magnet("magnet:?xt=urn:btih:not-a-hash")
+
+
+def test_magnet_cleaner_normalizes_base32_hash() -> None:
+    assert "0" * 40 in clean_magnet("magnet:?xt=urn:btih:" + "A" * 32)
+
+
+@pytest.mark.parametrize("invalid", ["a" * 33, "g" * 40, "1" * 32])
+def test_magnet_cleaner_rejects_invalid_encoding(invalid) -> None:
+    with pytest.raises(ValueError):
+        clean_magnet("magnet:?xt=urn:btih:" + invalid)
 
 
 def test_code_extractor_normalizes_separator() -> None:

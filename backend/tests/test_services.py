@@ -3,35 +3,29 @@ from types import SimpleNamespace
 import httpx
 
 from app.models.storage import StorageGroup, StorageGroupPath
-from app.services import magnet_metadata_client
 from app.services.magnet_metadata_client import MagnetMetadataApiClient
 from app.services.storage_service import choose_target
 
 
-def test_metadata_client_normalizes_upstream_payload(monkeypatch):
-    class Response:
-        status_code = 200
-
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {"info_hash": "abc", "name": "ABC-123", "files": [{"path": "ABC-123/video.mkv", "size": "12"}]}
-
-    monkeypatch.setattr(magnet_metadata_client.httpx, "request", lambda *args, **kwargs: Response())
-    result = MagnetMetadataApiClient("http://metadata:8080").fetch_metadata("magnet:?xt=urn:btih:abc")
+def test_metadata_client_normalizes_upstream_payload():
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={
+        "info_hash": "a" * 40, "name": "ABC-123", "size": 12,
+        "files": [{"path": "ABC-123/video.mkv", "size": 12}],
+    }))
+    with MagnetMetadataApiClient("http://metadata:8080", transport=transport) as client:
+        result = client.fetch_metadata("magnet:?xt=urn:btih:" + "a" * 40)
     assert result["metadata_fallback"] is False
     assert result["files"] == [{"name": "ABC-123/video.mkv", "path": "ABC-123/video.mkv", "size": 12, "offset": 0}]
 
 
-def test_metadata_client_falls_back_on_timeout(monkeypatch):
+def test_metadata_client_falls_back_on_timeout():
     def fail(*args, **kwargs):
         raise httpx.ReadTimeout("timeout")
 
-    monkeypatch.setattr(magnet_metadata_client.httpx, "request", fail)
-    result = MagnetMetadataApiClient("http://metadata:8080").parse_with_fallback(
-        "magnet:?xt=urn:btih:0123456789012345678901234567890123456789&dn=ABC-123"
-    )
+    with MagnetMetadataApiClient("http://metadata:8080", transport=httpx.MockTransport(fail)) as client:
+        result = client.parse_with_fallback(
+            "magnet:?xt=urn:btih:0123456789012345678901234567890123456789&dn=ABC-123"
+        )
     assert result["metadata_fallback"] is True
     assert result["fallback_reason"] == "bt_metadata_timeout"
     assert result["name"] == "ABC-123"
