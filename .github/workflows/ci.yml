@@ -35,4 +35,8 @@ jobs:
       - name: 安装前端依赖
         run: pnpm --dir frontend install --frozen-lockfile
       - name: 前端检查
-        run: pnpm --dir frontend lint && pnpm --dir frontend build
+        run: |
+          pnpm --dir frontend lint
+          pnpm --dir frontend format:check
+          pnpm --dir frontend test
+          pnpm --dir frontend build

@@ -18,10 +18,10 @@
 | 层级 | 技术 |
 |------|------|
 | 后端 | Python 3.12+, FastAPI, SQLAlchemy 2, Pydantic 2, Alembic |
-| 前端 | React 19, TypeScript, Vite, pnpm |
+| 前端 | React 19, TypeScript, React Router v7, Vite, pnpm |
 | UI 与样式 | shadcn/ui, Radix UI, Tailwind CSS v4 |
 | 状态与请求 | Zustand, Axios |
-| 代码质量 | Ruff, Pytest, Oxlint, Prettier |
+| 代码质量 | Ruff, Pytest, Oxlint, Prettier, Vitest, Testing Library |
 | 数据库 | SQLite + Alembic 迁移 |
 | 构建 | Make |
 | 部署 | Docker, Docker Compose |
@@ -72,8 +72,10 @@ make dev-frontend
 - [需求文档](docs/dev/requirements.md)
 - [架构设计](docs/dev/architecture.md)
 - [API 规范](docs/dev/api-spec.md)
+- [前端开发说明](frontend/README.md)
+- [前端目录优化 Batch 计划](docs/dev/frontend-structure-plan.md)
 
-前端通过 `@tailwindcss/vite` 接入 Tailwind CSS v4，使用 shadcn/ui 组件体系与 Radix UI 基础能力；Zustand 管理认证会话和界面状态，Axios 统一处理 API 请求与鉴权。源码由 Prettier 格式化，不再维护独立的 `App.css`。
+前端通过 `@tailwindcss/vite` 接入 Tailwind CSS v4，使用 shadcn/ui 组件体系与 Radix UI 基础能力。React Router 管理页面地址与认证守卫；Zustand 管理会话和全局错误提示；Axios 与业务 hooks 负责请求、取消和任务轮询，尚未接入 TanStack Query。开发时 Vite 将 `/api` 代理至 `http://127.0.0.1:8000`，生产由 FastAPI 托管 SPA。源码由 Prettier 格式化。
 
 ## 项目结构
 
@@ -97,10 +99,15 @@ Kuroko/
 │   └── src/
 │       ├── api/      # Axios API 客户端与领域请求
 │       ├── components/
-│       │   ├── layout/ # 应用布局与认证界面
-│       │   └── ui/     # shadcn/ui 基础组件与业务展示组件
+│       │   ├── layout/ # Shell 应用布局
+│       │   ├── common/ # 项目复用组件与认证表单
+│       │   └── ui/     # shadcn/ui 基础组件
+│       ├── pages/    # 六个业务页面、登录、初始化与 404
+│       ├── routes/   # 路由定义、导航元数据与认证守卫
+│       ├── hooks/    # 认证恢复、业务请求与轮询
 │       ├── lib/      # cn、格式化等通用工具
 │       ├── stores/   # Zustand 状态仓库
+│       ├── test/     # 测试环境与 API mock；用例与模块就近放置
 │       └── types/    # API 与领域类型
 ├── docs/             # 项目文档
 │   └── dev/          # 开发文档

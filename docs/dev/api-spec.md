@@ -282,7 +282,7 @@ curl -X POST "http://localhost:8000/api/v1/magnets/parse" \
 ### 4.2 批量提交离线下载任务
 - **路径**：`POST /api/v1/magnets/batch-download`
 - **认证**：需要 Bearer Token
-- **描述**：将选定的磁力任务提交至离线下载队列。系统会根据指定的存储分组智能选择可用空间最充足的存储节点，并将下载任务提交至 OpenList 客户端。若番号在库中已存在且 `force` 为 `false`，则自动跳过。
+- **描述**：将选定的磁力任务提交至离线下载队列。系统会根据指定的存储分组执行**碎片空间优先算法 (Best-Fit Minimal Remainder)**，在满足文件容量的候选节点中优先选择剩余空间最小的存储节点，并将下载任务提交至 OpenList 客户端（引擎固定为 PikPak，删除策略固定为总是删除）。若番号在库中已存在且 `force` 为 `false`，则自动拦截并放入 `skipped` 队列；若 `force` 为 `true`，则显式绕过去重拦截强制触发下载（适用于字幕版、高清版）。
 
 #### 请求参数 (Body)
 | 字段 | 类型 | 必选 | 说明 |
@@ -1133,6 +1133,50 @@ curl -X POST "http://localhost:8000/api/v1/config/test-connection" \
 {
   "code": 50201,
   "message": "无法连接到 OpenList 服务: Connection refused at http://localhost:5244",
+  "data": null
+}
+```
+
+---
+
+### 9.4 测试 BT 元数据解析服务 (magnet-metadata-api)
+- **路径**：`POST /api/v1/config/test-bt-parser`
+- **认证**：需要 Bearer Token
+- **描述**：测试 Kuroko 与 `magnet-metadata-api` 服务的连通性及响应时延。支持传参临时测试，也可不传参测试系统当前持久化的配置。
+
+#### 请求参数 (Body - 可选)
+| 字段 | 类型 | 必选 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `service_url` | string | 否 | 解析服务访问地址，如 `"http://magnet-metadata-api:8080"` |
+
+#### 请求示例
+```bash
+curl -X POST "http://localhost:8000/api/v1/config/test-bt-parser" \
+  -H "Authorization: Bearer <your_jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "service_url": "http://magnet-metadata-api:8080"
+  }'
+```
+
+#### 响应示例 (成功)
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "connected": true,
+    "service_name": "Torrent Metadata API Service",
+    "latency_ms": 25
+  }
+}
+```
+
+#### 响应示例 (失败)
+```json
+{
+  "code": 50202,
+  "message": "BT 解析服务不可用: Connection refused at http://magnet-metadata-api:8080",
   "data": null
 }
 ```
