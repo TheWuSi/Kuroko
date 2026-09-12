@@ -138,7 +138,7 @@ def api(monkeypatch):
     upstream = Upstream()
     transport = httpx.MockTransport(upstream.handle)
 
-    def openlist(config):
+    def openlist(config, **kwargs):
         return OpenListClient(config, transport=transport)
 
     def metadata(*args, **kwargs):

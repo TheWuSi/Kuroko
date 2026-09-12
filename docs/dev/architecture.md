@@ -58,7 +58,7 @@ backend/app/
 ├── serve.py                 # 生产启动入口 (python -m app.serve，自动准备目录与信号治理)
 ├── core/
 │   ├── config.py            # 基础环境变量加载与默认项
-│   ├── database.py          # SQLAlchemy 引擎、SessionLocal 依赖注入与 SQLite 连接池
+│   ├── database.py          # SQLAlchemy 引擎、会话与启动时 Alembic 升级
 │   ├── responses.py         # 统一 JSON 响应封装 (code, message, data)
 │   ├── security.py          # JWT Token 签发/校验与密码哈希
 │   └── spa.py               # 静态文件 SPA 路由回退中间件
@@ -74,8 +74,8 @@ backend/app/
 ├── models/                  # SQLAlchemy 数据库实体
 │   ├── user.py              # 用户表
 │   ├── task.py              # 下载任务表 (DownloadTask)
-│   ├── code.py              # 番号归档记录表 (CodeRecord)
-│   ├── storage.py           # 存储分组及挂载路径表 (StorageGroup, StorageGroupPath, StorageSpaceOverride)
+│   ├── code.py              # 番号记录与分组版本放行规则 (CodeRecord, DuplicateAllowance)
+│   ├── storage.py           # 分组成员、目录、容量覆盖和节点忽略项
 │   └── config.py            # 动态键值配置表与扫描任务表 (SystemConfig, ScanJob)
 ├── schemas/                 # Pydantic 强类型校验模型 (DTO)
 │   ├── auth.py, magnet.py, task.py, storage.py, code.py, config.py, common.py
@@ -87,6 +87,8 @@ backend/app/
 │   ├── download_service.py  # 离线下载调度、去重拦截与强制下载通道
 │   ├── storage_service.py   # 存储容量统计与 Best-Fit 碎片空间优先调度算法
 │   ├── code_service.py      # 定向探测路径扫描、规则过滤与番号归档 (解耦独立)
+│   ├── library_service.py   # 目录归属、组内跨盘查重与版本放行，解析/提交/扫描共用
+│   ├── read_cache.py        # 有界 TTL 读取缓存与并发请求合并
 │   └── config_service.py    # 动态系统配置读写与掩码脱敏
 └── utils/
     ├── magnet_parser.py     # 磁力链接标准化与冗余 Tracker 净化工具
@@ -166,6 +168,7 @@ erDiagram
         integer id PK
         string task_id UK
         string code
+        string variant
         string magnet
         string status
         float progress
@@ -182,6 +185,7 @@ erDiagram
     CodeRecord {
         integer id PK
         string code
+        string variant
         string storage_path
         string file_name
         integer file_size
@@ -198,8 +202,24 @@ erDiagram
     StorageGroupPath {
         integer id PK
         integer group_id FK
+        integer storage_id
         string storage_mount
         string folder_path
+        json archive_folders
+    }
+
+    StorageIgnore {
+        integer storage_id PK
+        string storage_mount
+        datetime created_at
+    }
+
+    DuplicateAllowance {
+        integer id PK
+        integer group_id FK
+        string code
+        json variants
+        datetime created_at
     }
 
     StorageSpaceOverride {
@@ -223,6 +243,7 @@ erDiagram
         string status
         integer scanned_files
         integer new_codes_found
+        integer duplicates_found
         string current_path
         float progress_percent
         string error_message
@@ -231,7 +252,14 @@ erDiagram
     }
 
     StorageGroup ||--o{ StorageGroupPath : "包含"
+    StorageGroup ||--o{ DuplicateAllowance : "允许版本共存"
 ```
+
+`StorageGroupPath` 保留旧表名与相对下载目录 `folder_path`，增加真实 `storage_id` 和相对归档目录列表 `archive_folders`；API 的 `members` 使用完整绝对路径。节点可加入多组，番号文件仅保存一份物理路径记录，按配置目录动态判断所属分组，避免目录调整或多组共享时产生重复索引。
+
+番号与版本分开保存，FC2 的可选 PPV 前缀不参与身份区分。版本放行规则按分组和番号保存版本集合，不绑定文件路径；只有集合内不同版本各一份时放行。同版本多份、未批准组合及活动任务冲突仍参与拦截。直接选择未分组目录时采用目录范围查重，前端明确显示该范围。
+
+启动通过 Alembic 升级到最新结构；完整的旧 `create_all` 数据库在无版本记录时自动标记 `0001_initial` 基线，包含版本表已存在但为空的情况。升级逐项检查已有表、列和索引，兼容旧进程提前创建新表或迁移部分执行的混合结构。SQLite 显式事务覆盖建表与数据变更，升级失败可整体回滚。`0002_library_scopes` 保留原下载目录，合并同分组同挂载的旧探测目录，归一化 FC2 与旧任务磁力的 URN，并建立忽略项、版本放行表及关键查询索引。旧成员无法离线推断真实存储 ID，暂存 null，界面按挂载匹配后在保存时绑定。
 
 ---
 
@@ -256,6 +284,12 @@ erDiagram
 OpenList 请求使用原始 `Authorization: <token>`，成功必须同时满足 HTTP 成功及业务 `code=200`。元数据服务没有内建认证；可选 Bearer token 仅用于外部认证代理。客户端复用连接并在使用结束后关闭，不把上游错误正文或存储 `addition` 中的凭据返回给前端。
 
 下载提交先保存本地待处理记录，成功后逐条持久化上游任务 ID。指定目录直接使用；未指定时以完整种子大小做分组调度，保守预留尚在等待/下载的任务容量。网络中断或提交响应异常时保留待核实任务，不自动重新下发。容量是上游快照，不能保证其他客户端并发写入后的剩余空间。
+
+解析和上游提交始终输出未编码冒号的 `magnet:?xt=urn:btih:…`，显示名单独编码。下载提交在进程内串行完成查重与任务占位，防止并发请求同时通过检查；强制下载也不能绕过节点忽略和同磁力同目录待处理任务检查。
+
+OpenList 读取缓存以连接配置摘要隔离，最多保存 256 项：存储、容量与离线工具缓存 30 秒，目录与文件信息 15 秒，登录令牌 600 秒。同键并发读取合并，失败不缓存，超过 2000 项的列表不驻留缓存。主动刷新跳过缓存，配额或忽略项变更清空缓存；扫描使用新目录结果。缓存及扫描、提交锁的范围均为单个服务进程。
+
+扫描读取各分组的下载和归档目录，合并相同挂载内重叠范围；独立子挂载须另行配置。单个扫描根限制 300 秒、5000 个目录和 100000 个条目。每 100 个文件保存进度；仅在一个根完整读取成功后移除失效的扫描记录，失败不会用部分结果清空旧索引。忽略节点停止后续扫描并保留已有记录。
 
 后台同步在工作线程中创建并关闭数据库会话，不阻塞异步 API。OpenList 的数字状态以 tache v0.2.2 为准，取消中、重试中、等待重试等状态持续轮询。离线完成不表示独立转存完成；上游未提供公开的父子任务关联，因此转存列表独立展示，番号库只接受定向扫描发现的真实文件。
 

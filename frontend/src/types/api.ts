@@ -52,11 +52,28 @@ export interface ParsedFileItem {
   filter_reason?: 'extension' | 'size' | 'blacklist_pattern' | null
 }
 
-export interface MagnetParseItem {
+export type CodeVariant = 'original' | 'C' | 'UC' | 'U'
+
+export interface TargetScope {
+  target_group?: string | number
+  target_path?: string
+}
+
+export interface DuplicateDecision {
+  exists_in_library: boolean
+  duplicate_blocked: boolean
+  duplicate_allowed: boolean
+  existing_location: string | null
+  scope_group_ids?: number[]
+  dedup_scope?: 'group' | 'directory' | 'unselected'
+}
+
+export interface MagnetParseItem extends DuplicateDecision {
   original_magnet: string
   cleaned_magnet: string
   dn_code: string | null
   verified_code: string | null
+  variant: CodeVariant
   total_files_count: number
   total_size: number
   info_hash: string
@@ -76,6 +93,7 @@ export interface MagnetParseResponse {
 export interface DownloadTaskSubmitItem {
   magnet: string
   code: string
+  variant?: CodeVariant
   force?: boolean
   target_group?: string | number
   target_path?: string
@@ -160,7 +178,9 @@ export interface TaskListResponse {
  * 番号归档
  */
 export interface CodeRecord {
+  id: number
   code: string
+  variant: CodeVariant
   storage_path: string
   file_name: string
   file_size: number
@@ -180,6 +200,7 @@ export interface ScanJobStatus {
   status: 'pending' | 'scanning' | 'completed' | 'failed' | 'cancelled'
   scanned_files: number
   new_codes_found: number
+  duplicates_found: number
   current_path: string | null
   progress_percent: number
   started_at: string
@@ -200,6 +221,30 @@ export interface StorageNodeInfo {
   free_space: number | null
   space_source: 'openlist' | 'manual'
   space_error?: string | null
+  ignored: boolean
+}
+
+export interface StorageMemberInput {
+  storage_id: number
+  download_path: string
+  archive_paths: string[]
+}
+
+export interface StorageMember extends Omit<StorageMemberInput, 'storage_id'> {
+  id: number
+  storage_id: number | null
+  storage_mount: string
+}
+
+export interface StorageIgnore {
+  storage_id: number
+  storage_mount: string
+}
+
+export interface DirectoryListing {
+  path: string
+  mount_path: string
+  directories: Array<{ name: string; path: string }>
 }
 
 export interface StorageGroupPath {
@@ -212,8 +257,29 @@ export interface StorageGroup {
   id: number
   name: string
   paths: StorageGroupPath[]
+  members: StorageMember[]
   storage_paths: string[]
   created_at: string
+}
+
+export interface DuplicateGroup {
+  group_id: number
+  group_name: string
+  code: string
+  variants: CodeVariant[]
+  allowed_variants: CodeVariant[]
+  ignored: boolean
+  can_ignore: boolean
+  reason: 'same_version' | 'version_combination'
+  files: CodeRecord[]
+}
+
+export interface DuplicateAllowance {
+  id: number
+  group_id: number
+  group_name: string
+  code: string
+  variants: CodeVariant[]
 }
 
 /**

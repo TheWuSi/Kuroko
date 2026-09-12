@@ -37,6 +37,7 @@ def test_metadata_client_falls_back_on_timeout():
 
 
 def test_choose_target_uses_best_fit(monkeypatch):
+    monkeypatch.setattr("app.services.storage_service.is_ignored_path", lambda db, path: False)
     group = StorageGroup(name="media")
     group.paths = [
         StorageGroupPath(storage_mount="/a", folder_path="/video"),

@@ -3,11 +3,11 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.models.code import CodeRecord
 from app.services.config_service import get_config
+from app.services.library_service import duplicate_decision
 from app.services.magnet_metadata_client import MagnetMetadataApiClient
-from app.utils.code_extractor import extract_code
-from app.utils.magnet_parser import clean_magnet
+from app.utils.code_extractor import extract_code, extract_variant
+from app.utils.magnet_parser import clean_magnet, magnet_display_name
 
 
 def filter_files(
@@ -48,7 +48,19 @@ def filter_files(
     return valid, rejected
 
 
-def parse_magnets(db: Session, links: list[str]) -> list[dict[str, Any]]:
+def metadata_variant(metadata: dict[str, Any], code: str, magnet: str) -> str:
+    names = [str(item.get("name") or item.get("path") or "") for item in metadata.get("files", [])]
+    names.extend([metadata.get("name") or "", magnet_display_name(magnet)])
+    return next((variant for name in names if (variant := extract_variant(name, code)) != "original"), "original")
+
+
+def parse_magnets(
+    db: Session,
+    links: list[str],
+    *,
+    target_group: str | int | None = None,
+    target_path: str | None = None,
+) -> list[dict[str, Any]]:
     config = get_config(db, masked=False)
     parser = MagnetMetadataApiClient(
         config["bt_parser"].get("service_url", ""),
@@ -59,7 +71,7 @@ def parse_magnets(db: Session, links: list[str]) -> list[dict[str, Any]]:
         results = []
         for original in links:
             cleaned = clean_magnet(original)
-            dn_code = extract_code(cleaned, config["filter"].get("code_patterns", []))
+            dn_code = extract_code(magnet_display_name(cleaned), config["filter"].get("code_patterns", []))
             parsed = parser.parse_with_fallback(cleaned)
             valid, rejected = filter_files(parsed.get("files", []), config)
             verified_code = (
@@ -71,22 +83,41 @@ def parse_magnets(db: Session, links: list[str]) -> list[dict[str, Any]]:
                     ),
                     None,
                 )
+                or extract_code(parsed.get("name") or "", config["filter"].get("code_patterns", []))
                 or dn_code
             )
-            existing = db.query(CodeRecord).filter(CodeRecord.code == verified_code).first() if verified_code else None
+            variant = (
+                metadata_variant({**parsed, "files": valid}, verified_code, cleaned) if verified_code else "original"
+            )
+            decision = (
+                duplicate_decision(
+                    db,
+                    verified_code,
+                    variant,
+                    target_group=target_group,
+                    target_path=target_path,
+                )
+                if verified_code
+                else {
+                    "exists_in_library": False,
+                    "duplicate_blocked": False,
+                    "duplicate_allowed": False,
+                    "existing_location": None,
+                }
+            )
             results.append(
                 {
                     "original_magnet": original,
                     "cleaned_magnet": cleaned,
                     "dn_code": dn_code,
                     "verified_code": verified_code,
+                    "variant": variant,
                     "total_files_count": len(valid) + len(rejected),
                     "total_size": parsed["size"],
                     "info_hash": parsed["info_hash"],
                     "files": valid,
                     "filtered_files": rejected,
-                    "exists_in_library": existing is not None,
-                    "existing_location": f"{existing.storage_path}/{existing.file_name}" if existing else None,
+                    **decision,
                     "metadata_fallback": bool(parsed.get("metadata_fallback") or parsed.get("fallback")),
                     "fallback_reason": parsed.get("fallback_reason"),
                     "metadata_name": parsed.get("name") or None,

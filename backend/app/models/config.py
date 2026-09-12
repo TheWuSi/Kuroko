@@ -11,7 +11,9 @@ class SystemConfig(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     key: Mapped[str] = mapped_column(String(100), unique=True, index=True)
     value: Mapped[str] = mapped_column(Text)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class ScanJob(Base):
@@ -22,6 +24,7 @@ class ScanJob(Base):
     group_id: Mapped[int | None] = mapped_column(nullable=True)
     scanned_files: Mapped[int] = mapped_column(default=0)
     new_codes_found: Mapped[int] = mapped_column(default=0)
+    duplicates_found: Mapped[int] = mapped_column(default=0, server_default="0")
     current_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     progress_percent: Mapped[float] = mapped_column(default=0.0)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

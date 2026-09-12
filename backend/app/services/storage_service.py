@@ -6,14 +6,45 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.models.storage import StorageGroup, StorageSpaceOverride
+from app.models.storage import StorageGroup, StorageIgnore, StorageSpaceOverride
 from app.services.config_service import get_config
 from app.services.openlist_client import OpenListClient, OpenListError, nonnegative_int
+from app.services.read_cache import openlist_read_cache
 from app.utils.paths import child_path, is_within, join_path, normalize_path
 
 
 def get_client(db: Session) -> OpenListClient:
-    return OpenListClient(get_config(db, masked=False)["openlist"])
+    return OpenListClient(get_config(db, masked=False)["openlist"], cache=openlist_read_cache)
+
+
+def ignored_mounts(db: Session, remote: list[dict[str, Any]] | None = None) -> list[str]:
+    current = {item["id"]: item["mount_path"] for item in remote or []}
+    return [current.get(row.storage_id, row.storage_mount) for row in db.query(StorageIgnore).all()]
+
+
+def is_ignored_path(db: Session, path: str, remote: list[dict[str, Any]] | None = None) -> bool:
+    ignored = db.query(StorageIgnore).all()
+    if remote is not None:
+        try:
+            storage, _ = resolve_storage_path(path, remote)
+            return storage["id"] in {row.storage_id for row in ignored}
+        except ValueError:
+            pass
+    return any(is_within(path, row.storage_mount) for row in ignored)
+
+
+def group_roots(db: Session, group: StorageGroup) -> list[str]:
+    roots = [
+        join_path(member.storage_mount, folder)
+        for member in group.paths
+        for folder in [member.folder_path, *(member.archive_folders or [])]
+    ]
+    # 未能自动归入旧成员的探测配置仍参与原分组扫描，编辑分组后由新目录配置接管。
+    for probe in get_config(db, masked=False).get("probe_paths", []):
+        if probe.get("group_name") == group.name:
+            roots.extend(join_path(path["storage_mount"], path["folder"]) for path in probe.get("paths", []))
+    hidden = ignored_mounts(db)
+    return list(dict.fromkeys(root for root in roots if not any(is_within(root, mount) for mount in hidden)))
 
 
 def resolve_storage_path(path: str, storages: list[dict[str, Any]]) -> tuple[dict[str, Any], str]:
@@ -51,10 +82,42 @@ def storage_info(
     client: OpenListClient | None = None,
     remote: list[dict[str, Any]] | None = None,
     storage_id: int | None = None,
+    include_ignored: bool = False,
+    refresh: bool = False,
 ) -> list[dict[str, Any]]:
     with get_client(db) if client is None else nullcontext(client) as active_client:
         if remote is None:
-            remote = active_client.get_storage_info()
+            remote = active_client.get_storage_info(refresh=refresh)
+        overrides = tuple(sorted((row.storage_mount, row.total_space_bytes) for row in db.query(StorageSpaceOverride)))
+        ignores = tuple(sorted((row.storage_id, row.storage_mount) for row in db.query(StorageIgnore)))
+        result = active_client.cached(
+            ("capacity", overrides, ignores, storage_id),
+            lambda: _read_storage_info(db, client=active_client, remote=remote, storage_id=storage_id, refresh=refresh),
+            ttl=30,
+            refresh=refresh,
+        )
+        return [item for item in result if include_ignored or not item["ignored"]]
+
+
+def _read_storage_info(
+    db: Session,
+    *,
+    client: OpenListClient,
+    remote: list[dict[str, Any]],
+    storage_id: int | None,
+    refresh: bool,
+) -> list[dict[str, Any]]:
+    ignored = {row.storage_id: row for row in db.query(StorageIgnore).all()}
+    # 已从 OpenList 移除的忽略项仍可显示并撤销，不需要重新连接已删除的节点。
+    remote = [
+        *remote,
+        *[
+            {"id": row.storage_id, "mount_path": row.storage_mount, "driver": "unknown", "status": "missing"}
+            for row in ignored.values()
+            if all(item["id"] != row.storage_id for item in remote)
+        ],
+    ]
+    with nullcontext(client) as active_client:
         overrides = {row.storage_mount: row for row in db.query(StorageSpaceOverride).all()}
         result = []
         deadline = time.monotonic() + 30
@@ -63,6 +126,22 @@ def storage_info(
                 continue
             mount = item["mount_path"]
             override = overrides.get(mount)
+            if item["id"] in ignored:
+                result.append(
+                    {
+                        "id": item["id"],
+                        "mount_path": mount,
+                        "driver": item["driver"],
+                        "status": item["status"],
+                        "ignored": True,
+                        "total_space": None,
+                        "used_space": None,
+                        "free_space": None,
+                        "space_source": "manual" if override else "openlist",
+                        "space_error": None,
+                    }
+                )
+                continue
             total, used, free = _capacity_values(item.get("mount_details"))
             space_error = None
             needs_native_usage = used is None if override else free is None
@@ -73,7 +152,7 @@ def storage_info(
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise OpenListError("容量查询超出时间预算")
-                    root = active_client.get_file(mount, timeout=min(5, remaining))
+                    root = active_client.get_file(mount, timeout=min(5, remaining), refresh=refresh)
                     root_total, root_used, root_free = _capacity_values(root.get("mount_details"))
                     if root_used is not None:
                         used = root_used
@@ -93,7 +172,7 @@ def storage_info(
                         space_error = "此挂载包含独立子挂载，无法完整统计用量；请在 OpenList 启用原生容量查询"
                     else:
                         try:
-                            used = _used_bytes(active_client, mount, deadline=deadline)
+                            used = _used_bytes(active_client, mount, deadline=deadline, refresh=refresh)
                         except (OpenListError, ValueError) as exc:
                             used = None
                             space_error = f"手动配额已保存，但目录用量统计失败：{exc}"
@@ -122,12 +201,13 @@ def storage_info(
                     "free_space": free,
                     "space_source": "manual" if override else "openlist",
                     "space_error": space_error,
+                    "ignored": False,
                 }
             )
         return result
 
 
-def _used_bytes(client: OpenListClient, root: str, *, deadline: float | None = None) -> int:
+def _used_bytes(client: OpenListClient, root: str, *, deadline: float | None = None, refresh: bool = False) -> int:
     """完整统计当前挂载的文件；超过预算时返回未知，避免把部分扫描当作全部用量。"""
     root = normalize_path(root)
     pending = [root]
@@ -141,7 +221,7 @@ def _used_bytes(client: OpenListClient, root: str, *, deadline: float | None = N
         if current in visited:
             continue
         visited.add(current)
-        for entry in client.list_files(current, deadline=deadline):
+        for entry in client.list_files(current, deadline=deadline, refresh=refresh):
             if time.monotonic() > deadline or count >= 100000:
                 raise OpenListError("容量统计超出预算，请使用提供原生容量的存储")
             path = child_path(current, entry["name"])
@@ -170,11 +250,15 @@ def choose_target(
     candidates = []
     for path in group.paths:
         target = join_path(path.storage_mount, path.folder_path)
+        if is_ignored_path(db, target):
+            continue
         try:
             info, _ = resolve_storage_path(target, infos)
         except ValueError:
             continue
-        if info.get("status", "work") != "work":
+        if info.get("ignored") or info.get("status", "work") != "work":
+            continue
+        if path.storage_id is not None and info.get("id") != path.storage_id:
             continue
         free = info.get("free_space")
         if free is not None:

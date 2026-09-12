@@ -5,6 +5,9 @@ import type {
   DownloadTaskSubmitItem,
   BatchDownloadResponse,
   MagnetParseItem,
+  TargetScope,
+  DuplicateDecision,
+  CodeVariant,
 } from '@/types/api'
 
 // 后端解析超时最高 300 秒，为降级响应和网络传输留出余量。
@@ -13,7 +16,7 @@ const SUBMIT_TIMEOUT_MS = 600_000
 
 export const magnetService = {
   // 解析磁力链接 (调用后端对接的 magnet-metadata-api)
-  async parseMagnets(links: string[], signal?: AbortSignal): Promise<MagnetParseResponse> {
+  async parseMagnets(links: string[], signal?: AbortSignal, scope: TargetScope = {}): Promise<MagnetParseResponse> {
     const results: Array<MagnetParseItem | undefined> = Array.from({ length: links.length })
     const errors: NonNullable<MagnetParseResponse['errors']> = []
     let nextIndex = 0
@@ -24,7 +27,7 @@ export const magnetService = {
         try {
           const res = await apiClient.post<ApiResponse<MagnetParseResponse>>(
             '/magnets/parse',
-            { magnet_links: [links[index]] },
+            { magnet_links: [links[index]], ...scope },
             { signal, timeout: PARSE_TIMEOUT_MS }
           )
           const item = res.data.data.results[0]
@@ -41,6 +44,15 @@ export const magnetService = {
       results: results.filter((item): item is MagnetParseItem => item !== undefined),
       errors: errors.sort((a, b) => a.index - b.index),
     }
+  },
+
+  async checkDuplicates(
+    items: Array<{ code: string; variant: CodeVariant }>, scope: TargetScope, signal?: AbortSignal,
+  ): Promise<DuplicateDecision[]> {
+    const res = await apiClient.post<ApiResponse<{ items: DuplicateDecision[] }>>('/magnets/check-duplicates', {
+      items, ...scope,
+    }, { signal })
+    return res.data.data.items
   },
 
   // 按条提交避免整批等待超过请求超时；保留成功项，任何失败都不自动重试。

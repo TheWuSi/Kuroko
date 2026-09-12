@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { StorageDirectoryField } from '@/components/common/StorageDirectoryField'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { FileTree } from '@/components/common/FileTree'
@@ -11,10 +11,11 @@ import { Magnet, Zap, Download, AlertTriangle, CheckCircle2, Copy, Check, Refres
 import { cleanBatchMagnets, cleanMagnetUri } from '@/lib/magnet'
 import { normalizeStoragePath } from '@/lib/path'
 import { formatBytes } from '@/lib/format'
+import { variantLabel } from '@/lib/storage'
 import { magnetService } from '@/services/magnet.service'
 import { storageService } from '@/services/storage.service'
 import { toast } from '@/stores/uiStore'
-import type { MagnetParseItem, MagnetParseResponse, StorageGroup } from '@/types/api'
+import type { CodeVariant, MagnetParseItem, MagnetParseResponse, StorageGroup, StorageNodeInfo, TargetScope } from '@/types/api'
 
 type SubmissionOutcome = {
   state: 'submitted' | 'failed' | 'unknown' | 'already_exists'
@@ -37,22 +38,67 @@ export function MagnetParser() {
   const [parseErrors, setParseErrors] = useState<NonNullable<MagnetParseResponse['errors']>>([])
   const [outcomes, setOutcomes] = useState<Record<string, SubmissionOutcome>>({})
   const [groups, setGroups] = useState<StorageGroup[]>([])
+  const [storages, setStorages] = useState<StorageNodeInfo[]>([])
+  const [targetMode, setTargetMode] = useState<'direct' | 'group'>('direct')
+  const [selectedStorage, setSelectedStorage] = useState('')
   const [selectedGroup, setSelectedGroup] = useState('')
   const [targetPath, setTargetPath] = useState('')
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
   const parseController = useRef<AbortController | null>(null)
+  const [checkedKey, setCheckedKey] = useState('')
+  const [checkVersion, setCheckVersion] = useState(0)
+  const [checkError, setCheckError] = useState('')
+  const currentStorage = storages.find((node) => node.id === Number(selectedStorage))
+  let normalizedTarget = ''
+  try { if (targetPath.trim()) normalizedTarget = normalizeStoragePath(targetPath) } catch { /* 完成输入后再校验。 */ }
+  const targetReady = targetMode === 'group' ? Boolean(selectedGroup) : Boolean(currentStorage && normalizedTarget && (
+    normalizedTarget === currentStorage.mount_path || normalizedTarget.startsWith(currentStorage.mount_path.replace(/\/$/, '') + '/')
+  ))
+  const scope: TargetScope = targetMode === 'group'
+    ? { target_group: selectedGroup ? Number(selectedGroup) : undefined }
+    : { target_path: normalizedTarget || undefined }
+  const scopeKey = JSON.stringify(scope)
+  const identitiesKey = JSON.stringify(results.map((item) => ({ code: item.verified_code || item.dn_code || 'UNKNOWN', variant: item.variant })))
+  const checkKey = scopeKey + identitiesKey + checkVersion
+  const checking = results.length > 0 && targetReady && checkedKey !== checkKey
+  const matchedGroups = targetMode === 'group' ? groups.filter((group) => group.id === Number(selectedGroup)) : groups.filter((group) => group.members.some((member) => (
+    [member.download_path, ...member.archive_paths].some((root) => normalizedTarget === root || normalizedTarget.startsWith(root.replace(/\/$/, '') + '/'))
+  )))
 
   useEffect(() => {
-    storageService.getGroups().then(setGroups).catch((error) => {
-      toast.error(error instanceof Error ? error.message : '加载存储分组失败')
-    })
-    return () => parseController.current?.abort()
+    const controller = new AbortController()
+    storageService.getGroups(controller.signal).then((items) => {
+      setGroups(items)
+      setSelectedGroup((previous) => previous || (items[0] ? String(items[0].id) : ''))
+    }).catch((error) => { if (!controller.signal.aborted) toast.error(error instanceof Error ? error.message : '加载分组失败') })
+    storageService.getStorages(undefined, controller.signal).then((items) => {
+      setStorages(items)
+      setSelectedStorage((previous) => previous || (items[0] ? String(items[0].id) : ''))
+    }).catch((error) => { if (!controller.signal.aborted) toast.error(error instanceof Error ? error.message : '加载挂载失败') })
+    return () => { controller.abort(); parseController.current?.abort() }
   }, [])
+
+  useEffect(() => {
+    if (!targetReady || identitiesKey === '[]') return
+    const controller = new AbortController()
+    setCheckError('')
+    const timer = setTimeout(() => {
+      const identities: Array<{ code: string; variant: CodeVariant }> = JSON.parse(identitiesKey)
+      magnetService.checkDuplicates(identities, JSON.parse(scopeKey) as TargetScope, controller.signal).then((checks) => {
+        if (controller.signal.aborted) return
+        setResults((previous) => previous.map((item, index) => ({ ...item, ...checks[index] })))
+        setCheckedKey(checkKey)
+      }).catch((error) => {
+        if (!controller.signal.aborted) setCheckError(error instanceof Error ? error.message : '查重失败，请重试')
+      })
+    }, 250)
+    return () => { clearTimeout(timer); controller.abort() }
+  }, [scopeKey, identitiesKey, checkKey, targetReady])
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const raw = e.target.value
     const cleaned = cleanBatchMagnets(raw)
-    setInputText(cleaned.totalTrackersRemoved > 0 ? cleaned.cleanedText : raw)
+    setInputText(cleaned.cleanedText)
     setCleanedBadge(cleaned.totalTrackersRemoved > 0
       ? { count: cleaned.totalCleaned, trackers: cleaned.totalTrackersRemoved } : null)
   }
@@ -73,7 +119,7 @@ export function MagnetParser() {
     setParsing(true)
     setParseErrors([])
     try {
-      const data = await magnetService.parseMagnets(lines, controller.signal)
+      const data = await magnetService.parseMagnets(lines, controller.signal, targetReady ? scope : {})
       setResults(data.results)
       setParseErrors(data.errors ?? [])
       const fallbackCount = data.results.filter((item) => item.metadata_fallback).length
@@ -96,15 +142,15 @@ export function MagnetParser() {
 
   const submitItems = async (items: MagnetParseItem[], force: boolean) => {
     if (!items.length) return
+    if (!targetReady || checking || checkError) { toast.warning('请先选择有效下载位置并完成查重'); return }
     setSubmitting(true)
     try {
-      const target = targetPath.trim() ? normalizeStoragePath(targetPath) : undefined
       const response = await magnetService.submitBatchDownload(items.map((item) => ({
         magnet: item.cleaned_magnet,
         code: item.verified_code || item.dn_code || 'UNKNOWN',
+        variant: item.variant,
         force,
-        target_path: target,
-        target_group: target ? undefined : selectedGroup ? Number(selectedGroup) : undefined,
+        ...scope,
       })))
       const changes: Record<string, SubmissionOutcome> = {}
       for (const item of response.submitted) {
@@ -128,11 +174,12 @@ export function MagnetParser() {
       // 只有服务端确认库内存在，才更新入库标记；提交成功仅改变提交状态。
       setResults((previous) => previous.map((item) => {
         const existing = response.skipped.find((skip) => skip.magnet === item.cleaned_magnet && skip.reason === 'already_exists')
-        return existing ? { ...item, exists_in_library: true, existing_location: existing.existing_location } : item
+        return existing ? { ...item, exists_in_library: true, duplicate_blocked: true, duplicate_allowed: false, existing_location: existing.existing_location } : item
       }))
       const message = `已提交 ${response.submitted.length} 项，跳过 ${response.skipped.length} 项，失败或待核实 ${response.failed.length} 项`
       if (response.failed.length) toast.warning(message)
       else toast.success(message)
+      setCheckVersion((value) => value + 1)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '提交下载失败')
     } finally {
@@ -150,8 +197,8 @@ export function MagnetParser() {
     }
   }
 
-  const downloadable = results.filter((item) => !item.exists_in_library && !isBlocked(item))
-  const existingCount = results.filter((item) => item.exists_in_library).length
+  const downloadable = results.filter((item) => !item.duplicate_blocked && !isBlocked(item))
+  const existingCount = results.filter((item) => item.duplicate_blocked).length
 
   return (
     <div className="space-y-6">
@@ -176,33 +223,51 @@ export function MagnetParser() {
             onChange={handleInputChange}
             className="min-h-[130px] font-mono text-xs leading-relaxed"
           />
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <label htmlFor="download-target" className="text-sm font-medium">下载目录（可选）</label>
-              <Input
-                id="download-target"
-                placeholder="例如 /网盘/视频"
-                value={targetPath}
-                onChange={(event) => setTargetPath(event.target.value)}
-                disabled={submitting}
-                maxLength={1024}
-                className="min-h-[44px] font-mono"
-              />
-              <p className="text-xs text-muted-foreground">直接下载到该目录，不追加番号目录。留空时按分组容量自动选择。</p>
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="download-group" className="text-sm font-medium">自动调度分组</label>
-              <select
-                id="download-group"
-                value={selectedGroup}
-                onChange={(event) => setSelectedGroup(event.target.value)}
-                disabled={Boolean(targetPath.trim()) || submitting}
-                className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 text-sm disabled:opacity-50"
-              >
-                <option value="">{groups.length ? '默认分组' : '暂无分组，请指定下载目录'}</option>
-                {groups.map((group) => <option key={group.id} value={group.id}>{group.name}（{group.paths.length} 个目录）</option>)}
+          <div className="space-y-4 rounded-lg border p-3 sm:p-4">
+            <fieldset className="flex flex-wrap gap-x-5 gap-y-2" disabled={submitting || parsing}>
+              <legend className="mb-2 text-sm font-medium">下载位置</legend>
+              <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm">
+                <input type="radio" name="target-mode" checked={targetMode === 'direct'} onChange={() => setTargetMode('direct')} />选择 OpenList 存储与目录
+              </label>
+              <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm">
+                <input type="radio" name="target-mode" checked={targetMode === 'group'} onChange={() => setTargetMode('group')} />分组自动选盘
+              </label>
+            </fieldset>
+            {targetMode === 'direct' ? <div className="space-y-4">
+              <div className="space-y-1.5">
+                <label htmlFor="download-storage" className="text-sm font-medium">OpenList 存储</label>
+                <select id="download-storage" value={selectedStorage} disabled={submitting || parsing}
+                  className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 font-mono text-sm"
+                  onChange={(event) => { setSelectedStorage(event.target.value); setTargetPath('') }}>
+                  <option value="">{storages.length ? '请选择挂载存储' : '暂无可用挂载，请检查连接与忽略项'}</option>
+                  {storages.map((node) => <option key={node.id} value={node.id} disabled={node.status !== 'work'}>{node.mount_path} · {node.driver}{node.status !== 'work' ? '（不可用）' : ''}</option>)}
+                </select>
+              </div>
+              {currentStorage && groups.some((group) => group.members.some((member) => member.storage_id === currentStorage.id || member.storage_mount === currentStorage.mount_path)) && <div className="space-y-1.5">
+                <label htmlFor="saved-download-path" className="text-sm font-medium">使用分组中已配置的下载目录</label>
+                <select id="saved-download-path" value="" onChange={(event) => setTargetPath(event.target.value)} disabled={submitting || parsing}
+                  className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 text-sm">
+                  <option value="">选择常用目录…</option>
+                  {groups.flatMap((group) => group.members.filter((member) => member.storage_id === currentStorage.id || member.storage_mount === currentStorage.mount_path)
+                    .map((member) => <option key={group.id + '-' + member.id} value={member.download_path}>{group.name} · {member.download_path}</option>))}
+                </select>
+              </div>}
+              <StorageDirectoryField label="下载目录" storageId={currentStorage?.id ?? null} mountPath={currentStorage?.mount_path ?? ''}
+                value={targetPath} onChange={setTargetPath} allowRoot disabled={submitting || parsing} />
+              {targetPath && !targetReady && <p className="text-xs text-destructive">请选择所选挂载内的有效绝对目录。</p>}
+            </div> : <div className="space-y-1.5">
+              <label htmlFor="download-group" className="text-sm font-medium">存储分组</label>
+              <select id="download-group" value={selectedGroup} disabled={submitting || parsing} onChange={(event) => setSelectedGroup(event.target.value)}
+                className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 text-sm">
+                <option value="">{groups.length ? '请选择分组' : '请先在存储页面创建分组'}</option>
+                {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
               </select>
-            </div>
+              <p className="text-xs text-muted-foreground">按完整种子大小选择空间足够的成员，使用该成员已保存的下载目录。</p>
+            </div>}
+            {targetReady && <p className="text-xs text-muted-foreground">
+              {matchedGroups.length ? '查重范围：' + matchedGroups.map((group) => group.name).join('、') + ' 的全部下载与归档目录。'
+                : '此目录尚未纳入分组，当前仅检查该目录内的索引；如需跨盘查重，请先配置分组。'}
+            </p>}
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
             {inputText && (
@@ -234,15 +299,18 @@ export function MagnetParser() {
           <div className="flex flex-col gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="font-semibold">解析结果（{results.length} 项）</h2>
-              <p className="text-xs text-muted-foreground">可提交 {downloadable.length} 项，库内已存在 {existingCount} 项</p>
+              <p className="text-xs text-muted-foreground">{!targetReady ? '选择下载位置后进行查重' : checking ? '正在核对所选目录的重复记录…' : `可提交 ${downloadable.length} 项，重复拦截 ${existingCount} 项`}</p>
             </div>
             {downloadable.length > 0 && (
-              <Button onClick={() => submitItems(downloadable, false)} disabled={submitting || parsing} className="min-h-[44px] gap-2">
+              <Button onClick={() => submitItems(downloadable, false)} disabled={submitting || parsing || !targetReady || checking || Boolean(checkError)} className="min-h-[44px] gap-2">
                 {submitting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                 {submitting ? '提交中…' : `提交可下载项（${downloadable.length}）`}
               </Button>
             )}
           </div>
+          {checkError && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+            <span>{checkError}</span><Button variant="outline" className="min-h-[44px]" onClick={() => setCheckVersion((value) => value + 1)}>重试查重</Button>
+          </div>}
           {results.map((item, index) => {
             const outcome = outcomes[item.cleaned_magnet]
             return (
@@ -251,7 +319,8 @@ export function MagnetParser() {
                   <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono text-lg font-bold">{item.verified_code || item.dn_code || '未识别番号'}</span>
-                      {item.exists_in_library ? (
+                      <Badge variant="secondary" className="font-mono">{variantLabel(item.variant)}</Badge>
+                      {!targetReady ? <Badge variant="outline">待选择查重范围</Badge> : item.duplicate_allowed ? <Badge variant="success">版本组合已允许</Badge> : item.duplicate_blocked ? (
                         <Badge variant="warning" className="gap-1"><AlertTriangle className="h-3.5 w-3.5" />库内已存在</Badge>
                       ) : <Badge variant="outline">库内未收录</Badge>}
                       {outcome?.state === 'submitted' && <Badge variant="info" className="gap-1"><CheckCircle2 className="h-3.5 w-3.5" />已提交</Badge>}
@@ -262,8 +331,8 @@ export function MagnetParser() {
                       <Button variant="ghost" size="sm" className="min-h-[44px] gap-1" onClick={() => handleCopy(item.cleaned_magnet, index)}>
                         {copiedIndex === index ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}复制磁力
                       </Button>
-                      {item.exists_in_library && !isBlocked(item) && (
-                        <Button variant="outline" size="sm" disabled={submitting || parsing} className="min-h-[44px]" onClick={() => submitItems([item], true)}>强制下载此版</Button>
+                      {item.duplicate_blocked && !isBlocked(item) && (
+                        <Button variant="outline" size="sm" disabled={submitting || parsing || checking || !targetReady || Boolean(checkError)} className="min-h-[44px]" onClick={() => submitItems([item], true)}>强制下载此版</Button>
                       )}
                     </div>
                   </div>

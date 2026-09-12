@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { ApiResponse, CodeListResponse, ScanJobStatus } from '@/types/api'
+import type { ApiResponse, CodeListResponse, ScanJobStatus, DuplicateGroup, DuplicateAllowance, CodeVariant } from '@/types/api'
 
 export const codeService = {
   // 获取已发现番号记录 (支持分页、模糊搜索、分组筛选)
@@ -34,8 +34,37 @@ export const codeService = {
     return res.data.data
   },
 
+  async getScanPaths(groupId?: number, signal?: AbortSignal): Promise<string[]> {
+    const res = await apiClient.get<ApiResponse<{ paths: string[] }>>('/codes/scan/paths', {
+      params: { group_id: groupId }, signal,
+    })
+    return res.data.data.paths
+  },
+
+  async getDuplicates(groupId?: number, page = 1, signal?: AbortSignal): Promise<{ total: number; items: DuplicateGroup[] }> {
+    const res = await apiClient.get<ApiResponse<{ total: number; items: DuplicateGroup[] }>>('/codes/duplicates', {
+      params: { group_id: groupId, page }, signal,
+    })
+    return res.data.data
+  },
+
+  async getDuplicateIgnores(groupId?: number, signal?: AbortSignal): Promise<DuplicateAllowance[]> {
+    const res = await apiClient.get<ApiResponse<{ items: DuplicateAllowance[] }>>('/codes/duplicate-ignores', {
+      params: { group_id: groupId }, signal,
+    })
+    return res.data.data.items
+  },
+
+  async allowDuplicate(groupId: number, code: string, variants: CodeVariant[]): Promise<void> {
+    await apiClient.put('/codes/duplicate-ignores', { group_id: groupId, code, variants })
+  },
+
+  async revokeDuplicate(ruleId: number): Promise<void> {
+    await apiClient.delete(`/codes/duplicate-ignores/${ruleId}`)
+  },
+
   // 删除番号记录
-  async deleteCode(code: string): Promise<void> {
-    await apiClient.delete(`/codes/${code}`)
+  async deleteCode(code: string, groupId?: number): Promise<void> {
+    await apiClient.delete(`/codes/${encodeURIComponent(code)}`, { params: { group_id: groupId } })
   },
 }

@@ -204,6 +204,8 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
 
 请求包含 1～100 条 `magnet_links`，每条最多 8192 字符。Hash 仅接受 40 位十六进制或 32 位 Base32，规范化为小写十六进制。后端保留原始输入，清洗结果仅含 `xt/dn`。
 
+清洗结果与上游提交必须保留 `xt=urn:btih:` 冒号；输入中的旧百分号编码会纠正，显示名安全编码。可选 `target_group`（名称或 ID）、`target_path`（绝对目录）指定查重范围；未指定位置时返回未选范围状态。
+
 ```json
 {
   "magnet_links": [
@@ -221,15 +223,20 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
   "data": {
     "results": [{
       "original_magnet": "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=ABC-123",
-      "cleaned_magnet": "magnet:?xt=urn%3Abtih%3A0123456789abcdef0123456789abcdef01234567&dn=ABC-123",
+      "cleaned_magnet": "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=ABC-123",
       "info_hash": "0123456789abcdef0123456789abcdef01234567",
       "dn_code": "ABC-123",
       "verified_code": "ABC-123",
+      "variant": "original",
       "total_files_count": 2,
       "total_size": 1073742848,
       "files": [{"name": "ABC-123.mkv", "size": 1073741824, "filtered": false}],
       "filtered_files": [{"name": "readme.txt", "size": 1024, "filtered": true, "filter_reason": "extension"}],
       "exists_in_library": false,
+      "duplicate_blocked": false,
+      "duplicate_allowed": false,
+      "scope_group_ids": [],
+      "dedup_scope": "unselected",
       "existing_location": null,
       "metadata_fallback": false,
       "fallback_reason": null,
@@ -252,9 +259,10 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
 | `tasks` | array | 是 | 1～100 个任务 |
 | `tasks[].magnet` | string | 是 | 有效磁力链接 |
 | `tasks[].code` | string | 是 | 1～64 字符，禁止目录分隔符、控制字符与 `..` |
+| `tasks[].variant` | string | 否 | `original/C/UC/U`，作为未识别出版本时的提示；优先采用元数据中识别出的版本 |
 | `tasks[].force` | boolean | 否 | 默认 false，绕过番号库去重；不绕过同磁力同目录待处理任务检查 |
 | `tasks[].target_path` | string | 否 | OpenList 绝对目录，最多 1024 字符，优先于分组 |
-| `tasks[].target_group` | string / integer | 否 | 分组名称或 ID，目录留空时生效；省略使用 ID 最小的分组 |
+| `tasks[].target_group` | string / integer | 否 | 分组名称或 ID；目录留空时省略则使用 ID 最小的分组，同时传目录时要求目录属于此组 |
 | `tasks[].total_size` | integer | 否 | 兼容旧客户端；不会作为调度依据 |
 
 ```json
@@ -270,6 +278,8 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
 
 直接使用 `/OD/Video`，不添加番号或任务 ID 目录，不做文件整理。目录须属于正常工作的挂载，目标路径须可使用 PikPak；目录不存在时交 OpenList 创建。指定目录允许元数据降级，自动调度则必须由后端取得完整正数大小，并排除容量未知的节点。
 
+已忽略节点始终拒绝下载，包括 `force: true`。组内所有下载及归档目录参与查重，活动任务同样参与；不同组独立。未分组目录可直接下载，仅检查该目录范围。相同番号的不同版本需满足已保存的允许组合；同版本再次出现仍拦截，显式 `force` 可覆盖番号拦截。
+
 业务响应始终包含三个列表；单项失败不回滚之前已提交的任务：
 
 ```json
@@ -279,7 +289,7 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
   "data": {
     "submitted": [{
       "index": 0,
-      "magnet": "magnet:?xt=urn%3Abtih%3A0123456789abcdef0123456789abcdef01234567&dn=ABC-123",
+      "magnet": "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=ABC-123",
       "code": "ABC-123",
       "task_id": "4b7b2520-7b5c-4433-85f2-1bfa4430e7bb",
       "target_path": "/OD/Video",
@@ -297,6 +307,22 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
 
 提交结果未知时，本地保留无上游 ID 的待处理记录；先核对 OpenList，禁止自动重试。提交成功仅代表离线任务已创建，不代表已入库。前端逐条提交并合并结果，服务端保守计入此前尚在等待/下载的任务容量。
 
+### 4.3 切换位置后的查重预检
+
+`POST /api/v1/magnets/check-duplicates` 仅查询本地索引及活动任务，不重新请求磁力元数据。`items` 包含 1～100 个 `{code, variant}`，支持与解析相同的 `target_group/target_path`。
+
+```json
+{"items": [{"code": "FC2-654321", "variant": "UC"}], "target_group": 1}
+```
+
+响应 `data.items` 与输入顺序一致，每项包含：
+
+```json
+{"exists_in_library": true, "duplicate_blocked": true, "duplicate_allowed": false, "existing_location": "/OD/Archive/FC2-654321-C.mp4", "scope_group_ids": [1], "dedup_scope": "group"}
+```
+
+`exists_in_library` 表示范围内有文件或活动任务；提交按钮按 `duplicate_blocked` 判断。已批准且尚未存在的其他版本可返回 `duplicate_allowed: true`。`dedup_scope` 为 `group/directory/unselected`；未选择位置时不作全库拦截。实际提交仍重新校验，不能以预检结果代替提交时查重。
+
 ## 5. 模块 3: 下载与转存任务 (Tasks)
 
 ### 5.1 获取离线任务
@@ -310,7 +336,7 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
   "task_id": "4b7b2520-7b5c-4433-85f2-1bfa4430e7bb",
   "openlist_task_id": "openlist-task-42",
   "code": "ABC-123",
-  "magnet": "magnet:?xt=urn%3Abtih%3A0123456789abcdef0123456789abcdef01234567&dn=ABC-123",
+  "magnet": "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=ABC-123",
   "status": "downloading",
   "progress": 25.0,
   "speed": null,
@@ -376,7 +402,7 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
 
 ### 6.1 存储列表
 
-`GET /api/v1/storages` 返回 `data.storages` 数组，使用 OpenList 的真实存储 ID。
+`GET /api/v1/storages` 返回 `data.storages` 数组，使用 OpenList 的真实存储 ID，默认过滤忽略项。`refresh=true` 主动刷新；默认存储与容量读取缓存 30 秒。
 
 ```json
 {
@@ -388,6 +414,7 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
       "mount_path": "/OD",
       "driver": "Onedrive",
       "status": "work",
+      "ignored": false,
       "total_space": 1099511627776,
       "used_space": null,
       "free_space": null,
@@ -398,7 +425,7 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
 }
 ```
 
-`status` 为 `work/disabled/error`，容量未知用 null 表示，前端不得显示成 0 B 或假百分比。`space_error` 为容量不可用的具体原因，可为 null。驱动的 `total_space=0` 不作为有效总配额，兼容 GoogleDrive 的无限配额。
+`status` 为 `work/disabled/error`，容量未知用 null 表示，单节点保持未知且不展示假百分比；汇总时未知值按零计算，忽略节点不参与汇总。`space_error` 为容量不可用的具体原因，可为 null。驱动的 `total_space=0` 不作为有效总配额，兼容 GoogleDrive 的无限配额。
 
 ### 6.2 设置总配额
 
@@ -410,183 +437,71 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
 
 ---
 
+### 6.3 浏览目录
+
+`GET /api/v1/storages/{storage_id}/directories?path=/OD/Downloads` 只返回子目录；省略 path 从所选挂载根开始。`refresh=true` 强制刷新，默认使用 15 秒读取缓存。
+
+```json
+{"code": 0, "message": "success", "data": {"path": "/OD", "mount_path": "/OD", "directories": [{"name": "Downloads", "path": "/OD/Downloads"}, {"name": "Archive", "path": "/OD/Archive"}]}}
+```
+
+节点不存在返回 404；目录越界、已忽略或节点不可用返回 400，上游失败返回 502。独立子挂载需切换到对应节点，不通过父节点浏览越界。
+
+### 6.4 管理忽略节点
+
+`PUT /api/v1/storages/{storage_id}/ignore` 接受 `{"ignored": true}` 或 `{"ignored": false}`，返回 `{storage_id, ignored}`。忽略是本地配置，不禁用 OpenList 原挂载；隐藏节点、阻止直接和自动下载、跳过新扫描并排除容量汇总，保留现有索引。恢复也适用于已从上游移除的旧忽略项。
+
+`GET /api/v1/storages/ignored` 返回 `data.items: [{storage_id, storage_mount}]`，仅读本地配置，便于上游不可用时撤销。`GET /storages?include_ignored=true` 可包含忽略节点，标记 `ignored: true`，不查询它的容量；已移除节点状态为 `missing`。
+
 ## 7. 模块 5: 存储分组 (Storage Groups)
 
-分组路径按最长挂载前缀解析，支持多级挂载。响应同时提供完整 `storage_paths` 与结构化 `paths`（`id/storage_mount/folder_path`），前端请求使用 `/storage-groups`。
+### 7.1 读取分组
 
-### 7.1 获取所有存储分组
-- **路径**：`GET /api/v1/storage-groups`
-- **认证**：需要 Bearer Token
-- **描述**：获取系统中配置的所有存储分组及分组下绑定的挂载目录列表。
+`GET /api/v1/storage-groups` 返回 `data.groups`。每个分组包含真实存储成员 `members`，同时保留旧客户端需要的 `storage_paths/paths`。同一节点可加入多个分组，新成员列表中同组不得重复选择节点。
 
-#### 请求参数
-无
+单个分组示例：
 
-#### 请求示例
-```bash
-curl -X GET "http://localhost:8000/api/v1/storage-groups" \
-  -H "Authorization: Bearer <your_jwt_token>"
-```
-
-#### 响应示例 (成功)
 ```json
 {
-  "code": 0,
-  "message": "success",
-  "data": {
-    "groups": [
-      {
-        "id": 1,
-        "name": "主力组",
-        "storage_paths": [
-          "/OD/Video1",
-          "/OD/Video2",
-          "/OD1/Video1"
-        ],
-        "created_at": "2026-09-01T10:00:00Z",
-        "updated_at": "2026-09-06T12:00:00Z"
-      },
-      {
-        "id": 2,
-        "name": "备用组",
-        "storage_paths": [
-          "/OD1/Video2"
-        ],
-        "created_at": "2026-09-02T11:00:00Z",
-        "updated_at": "2026-09-02T11:00:00Z"
-      }
-    ]
-  }
-}
-```
-
----
-
-### 7.2 创建存储分组
-- **路径**：`POST /api/v1/storage-groups`
-- **认证**：需要 Bearer Token
-- **描述**：创建新的存储分组，并关联指定的存储目录路径。
-
-#### 请求参数 (Body)
-| 字段 | 类型 | 必选 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `name` | string | 是 | 分组名称（唯一），如 `"主力组"` |
-| `storage_paths` | array[string] | 是 | 包含的存储挂载路径列表，至少包含 1 个有效路径 |
-
-#### 请求示例
-```bash
-curl -X POST "http://localhost:8000/api/v1/storage-groups" \
-  -H "Authorization: Bearer <your_jwt_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "主力组",
-    "storage_paths": [
-      "/OD/Video1",
-      "/OD/Video2",
-      "/OD1/Video1"
-    ]
-  }'
-```
-
-#### 响应示例 (成功)
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
+  "id": 1,
+  "name": "主媒体库",
+  "members": [{
     "id": 1,
-    "name": "主力组",
-    "storage_paths": [
-      "/OD/Video1",
-      "/OD/Video2",
-      "/OD1/Video1"
-    ],
-    "created_at": "2026-09-06T19:53:00Z",
-    "updated_at": "2026-09-06T19:53:00Z"
-  }
+    "storage_id": 73,
+    "storage_mount": "/OD",
+    "download_path": "/OD/Downloads",
+    "archive_paths": ["/OD/Archive"]
+  }],
+  "storage_paths": ["/OD/Downloads"],
+  "paths": [{"id": 1, "storage_id": 73, "storage_mount": "/OD", "folder_path": "/Downloads", "archive_folders": ["/Archive"]}],
+  "created_at": "2026-09-13T00:00:00",
+  "updated_at": "2026-09-13T00:00:00"
 }
 ```
 
----
+旧成员尚未绑定真实 ID 时 `storage_id` 可为 null，前端按 `storage_mount` 匹配当前挂载后提交真实 ID。内部 `folder_path/archive_folders` 是相对挂载的路径，`members` 使用完整绝对路径。
 
-### 7.3 更新存储分组
-- **路径**：`PUT /api/v1/storage-groups/{group_id}`
-- **认证**：需要 Bearer Token
-- **描述**：更新指定分组的名称或包含的存储目录路径。
+### 7.2 创建与更新分组
 
-#### 路径参数 (Path)
-| 字段 | 类型 | 必选 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `group_id` | integer | 是 | 存储分组 ID |
+`POST /api/v1/storage-groups` 创建，返回 HTTP 201；`PUT /api/v1/storage-groups/{group_id}` 局部更新名称或整体替换成员列表。
 
-#### 请求参数 (Body)
-| 字段 | 类型 | 必选 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `name` | string | 否 | 分组名称 |
-| `storage_paths` | array[string] | 否 | 存储挂载路径列表 |
-
-#### 请求示例
-```bash
-curl -X PUT "http://localhost:8000/api/v1/storage-groups/1" \
-  -H "Authorization: Bearer <your_jwt_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "主力核心组",
-    "storage_paths": [
-      "/OD/Video1",
-      "/OD/Video2"
-    ]
-  }'
-```
-
-#### 响应示例 (成功)
 ```json
 {
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": 1,
-    "name": "主力核心组",
-    "storage_paths": [
-      "/OD/Video1",
-      "/OD/Video2"
-    ],
-    "updated_at": "2026-09-06T19:54:00Z"
-  }
+  "name": "主媒体库",
+  "members": [
+    {"storage_id": 73, "download_path": "/OD/Downloads", "archive_paths": ["/OD/Archive"]},
+    {"storage_id": 99, "download_path": "/GD/Incoming", "archive_paths": ["/GD/Library"]}
+  ]
 }
 ```
 
----
+名称 1～100 字符且唯一；成员 1～100 个，每成员一个下载目录，归档目录 0～20 个。目录最多 1024 字符，须属于指定真实存储 ID 的具体子目录；拒绝跨挂载、根目录、路径遍历及控制字符。不会自动移动或创建媒体库文件。
 
-### 7.4 删除存储分组
-- **路径**：`DELETE /api/v1/storage-groups/{group_id}`
-- **认证**：需要 Bearer Token
-- **描述**：根据分组 ID 删除存储分组。
+为兼容旧客户端，仍接受 `storage_paths: ["/OD/Downloads"]`，并按最长挂载前缀解析；`members` 与 `storage_paths` 不可同时提交。旧路径更新保留同节点已有归档目录；新 `members` 的 `archive_paths` 省略时为空列表。新成员配置保存后接管同名旧探测配置，单独改名保留目录。
 
-#### 路径参数 (Path)
-| 字段 | 类型 | 必选 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `group_id` | integer | 是 | 存储分组 ID |
+### 7.3 删除分组
 
-#### 请求示例
-```bash
-curl -X DELETE "http://localhost:8000/api/v1/storage-groups/1" \
-  -H "Authorization: Bearer <your_jwt_token>"
-```
-
-#### 响应示例 (成功)
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": 1,
-    "deleted": true
-  }
-}
-```
-
----
+`DELETE /api/v1/storage-groups/{group_id}` 返回 `data: {id, deleted: true}`，删除成员配置与该组的版本放行规则，保留媒体文件及已有扫描记录。以上分组接口均需要认证。
 
 ## 8. 模块 6: 番号统计 (Codes)
 
@@ -594,6 +509,8 @@ curl -X DELETE "http://localhost:8000/api/v1/storage-groups/1" \
 - **路径**：`GET /api/v1/codes`
 - **认证**：需要 Bearer Token
 - **描述**：分页查询已发现并归档在库中的番号记录，支持按分组过滤及关键字模糊搜索。
+
+分组范围包含每个成员的下载和归档目录，采用目录边界匹配，过滤已忽略节点。每条记录增加 `id`、`variant`、`source`；`total` 是媒体文件记录数。`search` 最多 64 字符，大小写及 FC2 前缀会归一化，通配符按普通字符搜索。
 
 #### 查询参数 (Query)
 | 字段 | 类型 | 必选 | 默认值 | 说明 |
@@ -620,14 +537,20 @@ curl -X GET "http://localhost:8000/api/v1/codes?group_id=1&search=ABC&page=1&pag
     "page_size": 50,
     "items": [
       {
+        "id": 1,
         "code": "ABC-123",
+        "variant": "original",
+        "source": "scan",
         "storage_path": "/OD/Video1",
         "file_name": "ABC-123.mp4",
         "file_size": 1073741824,
         "discovered_at": "2026-09-06T15:30:00Z"
       },
       {
+        "id": 2,
         "code": "ABC-124",
+        "variant": "original",
+        "source": "scan",
         "storage_path": "/OD/Video1",
         "file_name": "ABC-124.mkv",
         "file_size": 2147483648,
@@ -643,7 +566,9 @@ curl -X GET "http://localhost:8000/api/v1/codes?group_id=1&search=ABC&page=1&pag
 ### 8.2 触发番号扫描
 - **路径**：`POST /api/v1/codes/scan`
 - **认证**：需要 Bearer Token
-- **描述**：异步启动扫描后台任务，根据系统配置中的探测路径 (`probe_paths`) 遍历指定存储分组下的网盘文件，解析提取番号并存入统计数据库。
+- **描述**：异步扫描分组的下载与归档目录，兼容旧探测路径配置。`GET /api/v1/codes/scan/paths?group_id=1` 可预览完整路径列表，返回 `data.paths`。忽略节点跳过，未选择分组时扫描全部配置范围。
+
+无有效目录或范围为整个挂载/根目录返回 400，未知分组 404，已有扫描运行时 409。单根限制 300 秒、5000 个目录与 100000 个条目。完整读取成功后同步失效扫描记录，失败保留旧索引。不会移动或删除媒体文件。
 
 #### 请求参数 (Body)
 | 字段 | 类型 | 必选 | 说明 |
@@ -667,7 +592,7 @@ curl -X POST "http://localhost:8000/api/v1/codes/scan" \
   "message": "success",
   "data": {
     "task_id": "scan-e41ac820-21a1-460d-9b57-61c0d54a2a11",
-    "status": "scanning",
+    "status": "pending",
     "group_id": 1
   }
 }
@@ -701,6 +626,7 @@ curl -X GET "http://localhost:8000/api/v1/codes/scan/status" \
     "status": "scanning",
     "scanned_files": 1250,
     "new_codes_found": 86,
+    "duplicates_found": 0,
     "current_path": "/OD/Video1/Archive",
     "progress_percent": 65.4,
     "started_at": "2026-09-06T19:50:00Z",
@@ -716,6 +642,8 @@ curl -X GET "http://localhost:8000/api/v1/codes/scan/status" \
 - **路径**：`DELETE /api/v1/codes/{code}`
 - **认证**：需要 Bearer Token
 - **描述**：从番号统计表中移除某个番号的记录（注意：该操作仅清理数据库元数据记录，不会删除物理文件）。
+
+可选查询参数 `group_id` 将删除范围限定为此组的配置目录；不传时删除默认可见范围内该番号的记录。版本放行规则继续保留，可从规则接口单独撤销。
 
 #### 路径参数 (Path)
 | 字段 | 类型 | 必选 | 说明 |
@@ -741,6 +669,41 @@ curl -X DELETE "http://localhost:8000/api/v1/codes/ABC-123" \
 ```
 
 ---
+
+### 8.5 查询跨盘重复
+
+`GET /api/v1/codes/duplicates` 支持 `group_id`、`include_ignored`（默认 false）、`page`（默认 1）、`page_size`（默认 30，最大 100）。返回 `data: {total, items}`，每项对应一个分组内的一个重复番号；不同组独立计算。
+
+```json
+{
+  "group_id": 1,
+  "group_name": "主媒体库",
+  "code": "ABC-123",
+  "variants": ["C", "UC"],
+  "allowed_variants": [],
+  "ignored": false,
+  "can_ignore": true,
+  "reason": "version_combination",
+  "files": [
+    {"id": 1, "code": "ABC-123", "variant": "C", "storage_path": "/OD/Archive", "file_name": "ABC-123-C.mp4", "file_size": 1073741824, "source": "scan", "discovered_at": "2026-09-13T00:00:00"},
+    {"id": 2, "code": "ABC-123", "variant": "UC", "storage_path": "/GD/Library", "file_name": "ABC-123-UC.mp4", "file_size": 1073741824, "source": "scan", "discovered_at": "2026-09-13T00:00:00"}
+  ]
+}
+```
+
+同版本多份时 `reason: same_version`、`can_ignore: false`。只有所有版本各一份且均在已批准集合内才为 `ignored: true`，默认不列出。未知版本标为 `original`；`FC2-1234567` 与 `FC2-PPV-1234567` 合并为一个番号。
+
+### 8.6 持久化允许版本组合
+
+`PUT /api/v1/codes/duplicate-ignores` 创建或替换规则：
+
+```json
+{"group_id": 1, "code": "ABC-123", "variants": ["C", "UC"]}
+```
+
+`variants` 必须包含 2～4 个不同值，可选 `original/C/UC/U`。按分组和规范番号保存，文件移动和重新扫描不影响规则；重复的同版本不会因此放行。规则也供下载预检和提交使用。返回 `{id, group_id, code, variants}`。
+
+`GET /api/v1/codes/duplicate-ignores?group_id=1` 返回 `data.items`，每项包含 `id/group_id/group_name/code/variants`，即使文件暂时消失仍可管理规则。`DELETE /api/v1/codes/duplicate-ignores/{rule_id}` 撤销并返回 `{id, deleted: true}`。分组或规则不存在为 404，输入无效为 422，所有接口均需认证。
 
 ## 9. 模块 7: 在线配置 (Config)
 

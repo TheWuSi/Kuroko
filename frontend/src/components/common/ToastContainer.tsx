@@ -8,7 +8,7 @@ export function ToastContainer() {
   if (toasts.length === 0) return null
 
   return (
-    <div className="fixed top-4 right-4 left-4 sm:left-auto z-50 flex flex-col gap-2 max-w-md w-full pointer-events-none">
+    <div className="fixed top-4 right-4 left-4 sm:left-auto z-50 flex flex-col gap-2 max-w-md w-auto sm:w-full pointer-events-none">
       {toasts.map((toast) => (
         <ToastCard key={toast.id} toast={toast} onClose={() => removeToast(toast.id)} />
       ))}
@@ -45,7 +45,8 @@ function ToastCard({ toast, onClose }: { toast: ToastItem; onClose: () => void }
       </div>
       <button
         onClick={onClose}
-        className="text-slate-400 hover:text-slate-600 p-1 rounded-sm cursor-pointer"
+        aria-label="关闭提示"
+        className="min-h-[44px] min-w-[44px] -my-2 -mr-2 flex items-center justify-center text-slate-400 hover:text-slate-600 rounded-sm cursor-pointer"
       >
         <X className="h-4 w-4" />
       </button>

@@ -25,6 +25,7 @@ import { taskService } from '@/services/task.service'
 import { codeService } from '@/services/code.service'
 import { storageService } from '@/services/storage.service'
 import { formatBytes, formatSpeed } from '@/lib/format'
+import { summarizeStorage } from '@/lib/storage'
 import type { DownloadTask, StorageNodeInfo } from '@/types/api'
 
 export function Dashboard() {
@@ -41,7 +42,7 @@ export function Dashboard() {
       const [tasksRes, codesRes, storagesRes] = await Promise.all([
         taskService.getTasks({ page: 1, page_size: 20 }),
         codeService.getCodes({ page: 1, page_size: 1 }),
-        storageService.getStorages().catch(() => []),
+        storageService.getStorages({ refresh: isRefresh }).catch(() => []),
       ])
       setActiveTasks(tasksRes.items || [])
       setTotalCodes(codesRes.total || 0)
@@ -57,10 +58,7 @@ export function Dashboard() {
   }, [])
 
   // 计算存储统计
-  const totalStorageBytes = storages.length && storages.every((node) => node.total_space !== null)
-    ? storages.reduce((sum, node) => sum + (node.total_space ?? 0), 0) : null
-  const freeStorageBytes = storages.length && storages.every((node) => node.free_space !== null)
-    ? storages.reduce((sum, node) => sum + (node.free_space ?? 0), 0) : null
+  const storageSummary = summarizeStorage(storages)
   const downloadingTasks = activeTasks.filter((t) => t.status === 'downloading' || t.status === 'pending')
   const completedTasks = activeTasks.filter((t) => t.status === 'completed')
   const failedTasks = activeTasks.filter((t) => t.status === 'failed')
@@ -128,8 +126,8 @@ export function Dashboard() {
           />
           <StatCard
             title="纳管存储剩余容量"
-            value={formatBytes(freeStorageBytes)}
-            description={`总容量: ${formatBytes(totalStorageBytes)}`}
+            value={formatBytes(storageSummary.free)}
+            description={`已知总容量: ${formatBytes(storageSummary.total)}${storageSummary.unknown ? ` · ${storageSummary.unknown} 个节点容量未知，按 0 汇总` : ''}`}
             icon={<HardDrive className="h-5 w-5" />}
           />
           <StatCard

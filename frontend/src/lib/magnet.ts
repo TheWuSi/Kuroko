@@ -43,8 +43,6 @@ export function cleanMagnetUri(uri: string): CleanMagnetResult | null {
     let dn: string | null = null
     let trackersCount = 0
 
-    const newParams = new URLSearchParams()
-
     for (const [key, value] of params.entries()) {
       const lowerKey = key.toLowerCase()
       if (lowerKey === 'xt') {
@@ -52,12 +50,10 @@ export function cleanMagnetUri(uri: string): CleanMagnetResult | null {
         if (match && !infoHash) {
           infoHash = normalizeInfoHash(match[1])
           if (!infoHash) return null
-          newParams.set('xt', `urn:btih:${infoHash}`)
         }
       } else if (lowerKey === 'dn') {
         if (!dn && value) {
           dn = Array.from(value).slice(0, 1024).join('')
-          newParams.set('dn', dn)
         }
       } else if (lowerKey === 'tr') {
         trackersCount++
@@ -68,7 +64,9 @@ export function cleanMagnetUri(uri: string): CleanMagnetResult | null {
       return null
     }
 
-    const cleaned = `magnet:?${newParams.toString()}`
+    // xt 的 URN 分隔符必须保留冒号，避免部分离线工具拒绝百分号编码后的链接。
+    const displayName = dn ? `&${new URLSearchParams({ dn }).toString()}` : ''
+    const cleaned = `magnet:?xt=urn:btih:${infoHash}${displayName}`
 
     return {
       cleaned,

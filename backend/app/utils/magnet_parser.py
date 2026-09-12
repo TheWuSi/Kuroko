@@ -36,18 +36,17 @@ def clean_magnet(value: str) -> str:
     parsed = urlsplit(value.strip())
     if parsed.scheme.lower() != "magnet" or parsed.netloc or parsed.path or parsed.fragment:
         raise ValueError("非法的磁力链接格式")
-    params: list[tuple[str, str]] = []
-    seen_xt = False
-    seen_dn = False
+    info_hash = None
+    display_name = None
     for key, item in parse_qsl(parsed.query, keep_blank_values=False):
-        if key.lower() == "xt" and not seen_xt:
+        if key.lower() == "xt" and info_hash is None:
             match = re.fullmatch(r"urn:btih:(.+)", item, flags=re.IGNORECASE)
             if match:
-                params.append(("xt", f"urn:btih:{normalize_info_hash(match.group(1))}"))
-                seen_xt = True
-        elif key.lower() == "dn" and not seen_dn and item:
-            params.append(("dn", item[:1024]))
-            seen_dn = True
-    if not seen_xt:
+                info_hash = normalize_info_hash(match.group(1))
+        elif key.lower() == "dn" and display_name is None and item:
+            display_name = item[:1024]
+    if info_hash is None:
         raise ValueError("磁力链接缺少有效 xt 参数")
-    return "magnet:?" + urlencode(params)
+    # 部分离线工具不接受 urn%3Abtih%3A；仅显示名参与 URL 编码，URN 保持可读形式。
+    suffix = "&" + urlencode({"dn": display_name}) if display_name else ""
+    return f"magnet:?xt=urn:btih:{info_hash}{suffix}"

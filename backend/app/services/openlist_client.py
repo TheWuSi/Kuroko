@@ -1,5 +1,6 @@
 """OpenList v4.2.6 HTTP 适配层，协议依据官方文档和对应版本源码。"""
 
+import hashlib
 import json
 import re
 import time
@@ -8,6 +9,7 @@ from typing import Any, Literal
 import httpx
 
 from app.schemas.config import validate_optional_url
+from app.services.read_cache import ReadCache
 from app.utils.magnet_parser import clean_magnet
 from app.utils.paths import child_path, normalize_path
 
@@ -32,7 +34,16 @@ class OpenListClient:
     PAGE_SIZE = 100
     MAX_PAGES = 1000
 
-    def __init__(self, config: dict[str, Any], *, transport: httpx.BaseTransport | None = None):
+    def __init__(
+        self,
+        config: dict[str, Any],
+        *,
+        transport: httpx.BaseTransport | None = None,
+        cache: ReadCache | None = None,
+    ):
+        self.cache = cache
+        # 凭据变化即切换命名空间，缓存键和诊断输出都不暴露凭据本身。
+        self.cache_scope = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
         self.base_url = validate_optional_url(config.get("base_url", ""), "OpenList 地址")
         self.auth_type = config.get("auth_type", "token")
         self.username = config.get("username") or ""
@@ -53,6 +64,11 @@ class OpenListClient:
 
     def close(self) -> None:
         self.http.close()
+
+    def cached(self, key: tuple, load, *, ttl: float = 15, refresh: bool = False):
+        if self.cache is None:
+            return load()
+        return self.cache.get((self.cache_scope, *key), load, ttl=ttl, refresh=refresh)
 
     def _request(self, method: str, path: str, *, auth: bool = True, retry_auth: bool = True, **kwargs: Any) -> Any:
         if not self.base_url:
@@ -84,7 +100,7 @@ class OpenListClient:
         if response.status_code == 401 or code == 401:
             if auth and self.auth_type == "password" and retry_auth:
                 self.token = ""
-                self.login()
+                self.login(refresh=True)
                 return self._request(method, path, auth=auth, retry_auth=False, **kwargs)
             raise OpenListError("OpenList 鉴权失败，请检查账号或令牌", code=401)
         if not 200 <= response.status_code < 300:
@@ -102,7 +118,11 @@ class OpenListClient:
             raise OpenListError(messages.get(code, f"OpenList 拒绝请求（业务状态 {code}）"), code=code)
         return payload.get("data")
 
-    def login(self) -> str:
+    def login(self, *, refresh: bool = False) -> str:
+        self.token = self.cached(("login",), self._login, ttl=600, refresh=refresh)
+        return self.token
+
+    def _login(self) -> str:
         if not self.username or not self.password:
             raise OpenListError("请配置 OpenList 用户名和密码", code=401)
         data = self._request(
@@ -180,12 +200,26 @@ class OpenListClient:
                 raise OpenListError("OpenList 分页结果不完整")
         raise OpenListError("OpenList 列表超过单次读取上限")
 
-    def list_files(self, path: str, *, deadline: float | None = None) -> list[dict[str, Any]]:
+    def list_files(
+        self,
+        path: str,
+        *,
+        deadline: float | None = None,
+        refresh: bool = False,
+    ) -> list[dict[str, Any]]:
+        path = normalize_path(path)
+        return self.cached(
+            ("directory", path),
+            lambda: self._list_files(path, deadline=deadline, refresh=refresh),
+            refresh=refresh,
+        )
+
+    def _list_files(self, path: str, *, deadline: float | None, refresh: bool) -> list[dict[str, Any]]:
         path = normalize_path(path)
         entries = self._pages(
             "POST",
             "/api/fs/list",
-            {"path": path, "password": "", "refresh": False},
+            {"path": path, "password": "", "refresh": refresh},
             deadline=deadline,
         )
         for entry in entries:
@@ -197,14 +231,21 @@ class OpenListClient:
                 raise OpenListError("OpenList 返回了无效的文件属性")
         return [{key: item[key] for key in ("name", "size", "is_dir")} for item in entries]
 
-    def get_file(self, path: str, *, timeout: float | None = None) -> dict[str, Any]:
+    def get_file(self, path: str, *, timeout: float | None = None, refresh: bool = False) -> dict[str, Any]:
+        path = normalize_path(path)
+        return self.cached(("file", path), lambda: self._get_file(path, timeout=timeout), refresh=refresh)
+
+    def _get_file(self, path: str, *, timeout: float | None = None) -> dict[str, Any]:
         options = {"timeout": timeout} if timeout is not None else {}
         data = self._request("POST", "/api/fs/get", json={"path": normalize_path(path), "password": ""}, **options)
         if not isinstance(data, dict) or not isinstance(data.get("is_dir"), bool):
             raise OpenListError("OpenList 文件信息格式无效")
         return {key: data.get(key) for key in ("name", "size", "is_dir", "mount_details")}
 
-    def get_storage_info(self) -> list[dict[str, Any]]:
+    def get_storage_info(self, *, refresh: bool = False) -> list[dict[str, Any]]:
+        return self.cached(("storages",), self._get_storage_info, ttl=30, refresh=refresh)
+
+    def _get_storage_info(self) -> list[dict[str, Any]]:
         entries = self._pages("GET", "/api/admin/storage/list")
         result = []
         for entry in entries:
@@ -239,6 +280,10 @@ class OpenListClient:
         return result
 
     def get_offline_tools(self, path: str) -> list[str]:
+        path = normalize_path(path)
+        return self.cached(("tools", path), lambda: self._get_offline_tools(path), ttl=30)
+
+    def _get_offline_tools(self, path: str) -> list[str]:
         data = self._request(
             "GET",
             "/api/public/offline_download_tools",

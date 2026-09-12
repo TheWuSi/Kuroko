@@ -29,6 +29,7 @@ lint: ## 代码检查
 
 test: ## 运行测试
 	cd backend && $(PYTHON) -m pytest
+	cd frontend && $(PNPM) test
 
 format: ## 格式化代码
 	cd backend && $(PYTHON) -m ruff format .

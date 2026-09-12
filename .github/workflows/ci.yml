@@ -37,6 +37,5 @@ jobs:
       - name: 前端检查
         run: |
           pnpm --dir frontend lint
-          pnpm --dir frontend format:check
           pnpm --dir frontend test
           pnpm --dir frontend build

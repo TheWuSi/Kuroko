@@ -1,17 +1,19 @@
 """PikPak 离线提交及 OpenList 任务状态同步。"""
 
 import math
+import threading
 from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.models.code import CodeRecord
-from app.models.storage import StorageGroup
 from app.models.task import DownloadTask, TaskStatus
 from app.services.config_service import get_config
+from app.services.library_service import duplicate_decision, find_group
 from app.services.magnet_metadata_client import MagnetMetadataApiClient
+from app.services.magnet_service import metadata_variant
 from app.services.openlist_client import OpenListError, nonnegative_int
-from app.services.storage_service import choose_target, get_client, resolve_storage_path, storage_info
+from app.services.storage_service import choose_target, get_client, is_ignored_path, resolve_storage_path, storage_info
+from app.utils.code_extractor import canonical_code
 from app.utils.magnet_parser import clean_magnet, magnet_info_hash
 from app.utils.paths import normalize_path
 
@@ -28,6 +30,8 @@ STATE_STATUS = {
     8: TaskStatus.pending.value,
     9: TaskStatus.pending.value,
 }
+
+submit_lock = threading.Lock()
 
 
 def normalize_task(remote: dict[str, Any]) -> dict[str, Any]:
@@ -50,19 +54,6 @@ def normalize_task(remote: dict[str, Any]) -> dict[str, Any]:
         "state": state,
         "status_detail": remote.get("status") or "",
     }
-
-
-def _find_group(db: Session, target: str | int | None) -> StorageGroup:
-    query = db.query(StorageGroup)
-    if isinstance(target, int) or (isinstance(target, str) and target.isdigit()):
-        group = query.filter(StorageGroup.id == int(target)).first()
-    elif target:
-        group = query.filter(StorageGroup.name == target).first()
-    else:
-        group = query.order_by(StorageGroup.id).first()
-    if group is None:
-        raise ValueError("未找到目标存储分组，请指定下载目录或创建分组")
-    return group
 
 
 def _active_reservations(db: Session, mounts: list[dict[str, Any]]) -> dict[str, int]:
@@ -94,6 +85,12 @@ def _same_magnet(left: str, info_hash: str) -> bool:
 
 
 def submit_batch(db: Session, tasks: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    # 单进程服务中串行完成查重与本地占位，避免两个浏览器请求同时穿过去重检查。
+    with submit_lock:
+        return _submit_batch(db, tasks)
+
+
+def _submit_batch(db: Session, tasks: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     submitted, skipped, failed = [], [], []
     config = get_config(db, masked=False)["bt_parser"]
     mounts = infos = None
@@ -112,40 +109,35 @@ def submit_batch(db: Session, tasks: list[dict[str, Any]]) -> dict[str, list[dic
             task: DownloadTask | None = None
             try:
                 magnet = clean_magnet(item["magnet"])
-                code = item["code"]
-                existing = db.query(CodeRecord).filter(CodeRecord.code == code).first()
-                if existing and not item.get("force", False):
-                    skipped.append(
-                        {
-                            "index": index,
-                            "code": code,
-                            "magnet": magnet,
-                            "reason": "already_exists",
-                            "existing_location": f"{existing.storage_path}/{existing.file_name}",
-                        }
-                    )
-                    continue
+                code = canonical_code(item["code"])
                 if mounts is None:
                     mounts = client.get_storage_info()
                     reserved = _active_reservations(db, mounts)
+                if item.get("target_path") and is_ignored_path(db, item["target_path"], mounts):
+                    raise ValueError("下载目标所在存储已被忽略，请先在存储页面恢复")
                 info_hash = magnet_info_hash(magnet)
                 if info_hash not in metadata_cache:
                     metadata_cache[info_hash] = parser.parse_with_fallback(magnet)
                 metadata = metadata_cache[info_hash]
+                variant = metadata_variant(metadata, code, magnet)
+                if variant == "original" and item.get("variant"):
+                    variant = item["variant"]
                 size = metadata["size"]
                 if item.get("target_path"):
                     target = normalize_path(item["target_path"])
                 else:
                     if infos is None:
-                        infos = storage_info(db, client=client, remote=mounts)
+                        infos = storage_info(db, client=client, remote=mounts, include_ignored=True)
                     target, _ = choose_target(
                         db,
-                        _find_group(db, item.get("target_group")),
+                        find_group(db, item.get("target_group")),
                         size,
                         infos=infos,
                         reserved=reserved,
                     )
                 storage, _ = resolve_storage_path(target, mounts)
+                if is_ignored_path(db, target, mounts):
+                    raise ValueError("下载目标所在存储已被忽略")
                 if storage["status"] != "work":
                     raise ValueError("目标存储当前不可用")
                 active_tasks = (
@@ -169,6 +161,24 @@ def submit_batch(db: Session, tasks: list[dict[str, Any]]) -> dict[str, list[dic
                         }
                     )
                     continue
+                decision = duplicate_decision(
+                    db,
+                    code,
+                    variant,
+                    target_group=item.get("target_group"),
+                    target_path=target,
+                )
+                if decision["duplicate_blocked"] and not item.get("force", False):
+                    skipped.append(
+                        {
+                            "index": index,
+                            "code": code,
+                            "magnet": magnet,
+                            "reason": "already_exists",
+                            "existing_location": decision["existing_location"],
+                        }
+                    )
+                    continue
                 if target not in checked_paths:
                     try:
                         destination = client.get_file(target)
@@ -181,7 +191,7 @@ def submit_batch(db: Session, tasks: list[dict[str, Any]]) -> dict[str, list[dic
                     if "PikPak" not in client.get_offline_tools(target):
                         raise ValueError("OpenList 未启用 PikPak 离线工具，请检查 PikPak 挂载和离线临时目录")
                     checked_paths.add(target)
-                task = DownloadTask(code=code, magnet=magnet, target_path=target, total_size=size)
+                task = DownloadTask(code=code, variant=variant, magnet=magnet, target_path=target, total_size=size)
                 db.add(task)
                 # 先确认本地能够保存任务，再执行不可回滚的上游提交；各条任务单独提交事务。
                 db.commit()

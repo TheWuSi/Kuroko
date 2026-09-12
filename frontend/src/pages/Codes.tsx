@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
+import { Link } from 'react-router'
+import { DuplicateReview } from '@/components/common/DuplicateReview'
 import { PageHeader } from '@/components/common/PageHeader'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -46,6 +48,7 @@ import {
 import { codeService } from '@/services/code.service'
 import { storageService } from '@/services/storage.service'
 import { formatBytes } from '@/lib/format'
+import { variantLabel } from '@/lib/storage'
 import { toast } from '@/stores/uiStore'
 import type { CodeRecord, ScanJobStatus, StorageGroup } from '@/types/api'
 
@@ -56,6 +59,8 @@ export function Codes() {
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [loading, setLoading] = useState(true)
+  const [selectedGroup, setSelectedGroup] = useState<number | undefined>(undefined)
+  const [refreshVersion, setRefreshVersion] = useState(0)
 
   // 扫描控制抽屉
   const [scanOpen, setScanOpen] = useState(false)
@@ -63,6 +68,10 @@ export function Codes() {
   const [scanStatus, setScanStatus] = useState<ScanJobStatus | null>(null)
   const [groups, setGroups] = useState<StorageGroup[]>([])
   const [selectedScanGroup, setSelectedScanGroup] = useState<number | undefined>(undefined)
+  const [scanTaskId, setScanTaskId] = useState<string | null>(null)
+  const [scanPaths, setScanPaths] = useState<string[]>([])
+  const [pathsLoading, setPathsLoading] = useState(false)
+  const [pathsError, setPathsError] = useState('')
 
   const [copiedCode, setCopiedCode] = useState<string | null>(null)
   const [deletingCode, setDeletingCode] = useState<string | null>(null)
@@ -76,40 +85,58 @@ export function Codes() {
     return () => clearTimeout(handler)
   }, [search])
 
-  const fetchCodes = useCallback(async () => {
+  const fetchCodes = useCallback(async (signal?: AbortSignal) => {
     setLoading(true)
     try {
       const res = await codeService.getCodes({
         search: debouncedSearch || undefined,
+        group_id: selectedGroup,
         page,
         page_size: 24,
-      })
+      }, signal)
       setCodes(res.items || [])
       setTotal(res.total || 0)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '获取番号列表失败'
-      toast.error(msg)
+      if (!signal?.aborted) toast.error(msg)
     } finally {
-      setLoading(false)
+      if (!signal?.aborted) setLoading(false)
     }
-  }, [debouncedSearch, page])
+  }, [debouncedSearch, page, selectedGroup])
 
   useEffect(() => {
-    fetchCodes()
+    const controller = new AbortController()
+    void fetchCodes(controller.signal)
+    return () => controller.abort()
   }, [fetchCodes])
 
   // 加载存储分组供扫描选择
   useEffect(() => {
-    storageService.getGroups().then((res) => setGroups(res || [])).catch(() => {})
+    const controller = new AbortController()
+    storageService.getGroups(controller.signal).then((res) => setGroups(res || [])).catch(() => {})
+    return () => controller.abort()
   }, [])
+
+  useEffect(() => {
+    if (!scanOpen) return
+    const controller = new AbortController()
+    setPathsLoading(true)
+    setPathsError('')
+    setScanPaths([])
+    codeService.getScanPaths(selectedScanGroup, controller.signal).then(setScanPaths).catch((error) => {
+      if (!controller.signal.aborted) setPathsError(error instanceof Error ? error.message : '获取扫描范围失败')
+    }).finally(() => { if (!controller.signal.aborted) setPathsLoading(false) })
+    return () => controller.abort()
+  }, [scanOpen, selectedScanGroup])
 
   // 触发定向扫描
   const handleStartScan = async () => {
+    if (!scanPaths.length || pathsLoading) return
     setScanning(true)
     try {
       const res = await codeService.startScan(selectedScanGroup)
       toast.success('定向探测扫描已启动')
-      pollScanStatus(res.task_id)
+      setScanTaskId(res.task_id)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '启动扫描失败'
       toast.error(msg)
@@ -118,33 +145,46 @@ export function Codes() {
   }
 
   // 轮询扫描状态
-  const pollScanStatus = (taskId?: string) => {
-    const timer = setInterval(async () => {
+  useEffect(() => {
+    if (!scanTaskId) return
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const poll = async () => {
       try {
-        const s = await codeService.getScanStatus(taskId)
+        const s = await codeService.getScanStatus(scanTaskId, controller.signal)
         setScanStatus(s)
         if (s.status === 'completed' || s.status === 'failed' || s.status === 'cancelled') {
-          clearInterval(timer)
+          setScanTaskId(null)
           setScanning(false)
-          fetchCodes()
+          void fetchCodes()
+          setRefreshVersion((value) => value + 1)
           if (s.status === 'completed') {
-            toast.success(`扫描完成: 新发现 ${s.new_codes_found} 部番号`)
+            if (s.duplicates_found) toast.warning(`扫描完成，发现 ${s.duplicates_found} 组待处理重复`)
+            else toast.success(`扫描完成，新收录 ${s.new_codes_found} 条媒体记录`)
           }
+          return
         }
-      } catch {
-        clearInterval(timer)
-        setScanning(false)
+        timer = setTimeout(poll, 2000)
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setScanning(false)
+          setScanTaskId(null)
+          toast.error(error instanceof Error ? error.message : '读取扫描状态失败')
+        }
       }
-    }, 2000)
-  }
+    }
+    void poll()
+    return () => { controller.abort(); if (timer) clearTimeout(timer) }
+  }, [scanTaskId, fetchCodes])
 
   // 确认删除番号
   const confirmDeleteCode = async () => {
     if (!deletingCode) return
     try {
-      await codeService.deleteCode(deletingCode)
+      await codeService.deleteCode(deletingCode, selectedGroup)
       toast.success(`番号 ${deletingCode} 已从归档中移除`)
       fetchCodes()
+      setRefreshVersion((value) => value + 1)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '删除失败'
       toast.error(msg)
@@ -164,12 +204,16 @@ export function Codes() {
     <div className="space-y-6">
       <PageHeader
         title="番号媒体库归档"
-        description={`共计收录 ${total} 部番号资产，通过定向扫描确认实际落地文件`}
+        description={`当前范围收录 ${total} 条媒体记录，通过扫描下载与归档目录确认实际文件`}
       >
         <Button
           onClick={() => {
             setScanOpen(true)
-            codeService.getScanStatus().then((s) => setScanStatus(s)).catch(() => {})
+            setSelectedScanGroup(selectedGroup)
+            codeService.getScanStatus().then((s) => {
+              setScanStatus(s)
+              if (s.status === 'pending' || s.status === 'scanning') { setScanning(true); setScanTaskId(s.task_id) }
+            }).catch(() => {})
           }}
           className="gap-2 bg-blue-600 hover:bg-blue-700 min-h-[44px] sm:min-h-[36px]"
         >
@@ -183,16 +227,26 @@ export function Codes() {
         <div className="relative w-full sm:max-w-md">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <Input
+            aria-label="搜索番号"
             placeholder="按番号代码搜索，如 ABC-123..."
             value={search}
+            maxLength={64}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-10 font-mono text-sm"
           />
         </div>
+        <select aria-label="媒体库分组筛选" value={selectedGroup ?? ''}
+          onChange={(event) => { setSelectedGroup(event.target.value ? Number(event.target.value) : undefined); setPage(1) }}
+          className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 text-sm sm:w-auto">
+          <option value="">全部媒体记录</option>
+          {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+        </select>
         <div className="text-xs text-slate-500 font-mono self-start sm:self-auto">
           第 {page} 页 / 共 {Math.ceil(total / 24) || 1} 页
         </div>
       </div>
+
+      <DuplicateReview groupId={selectedGroup} refreshVersion={refreshVersion} />
 
       {/* 骨架屏加载状态 */}
       {loading ? (
@@ -312,6 +366,7 @@ export function Codes() {
 
                   <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-[11px]">
                     <span>{formatBytes(item.file_size)}</span>
+                    <Badge variant="outline" className="font-mono">{variantLabel(item.variant)}</Badge>
                     <Badge variant="secondary" className="text-[10px] px-1.5">
                       {item.source === 'download' ? '离线入库' : '定向扫描'}
                     </Badge>
@@ -352,14 +407,14 @@ export function Codes() {
 
       {/* 定向探测扫描控制抽屉 (Sheet) */}
       <Sheet open={scanOpen} onOpenChange={setScanOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-md p-6">
+        <SheetContent side="right" className="w-full overflow-y-auto p-6 sm:max-w-md">
           <SheetHeader>
             <div className="flex items-center gap-2 text-blue-600">
               <Radar className="h-5 w-5" />
               <SheetTitle>定向探测扫描</SheetTitle>
             </div>
             <SheetDescription>
-              仅扫描系统配置中指定的特定探测子目录（如 /OD/Video1），杜绝全库深度遍历，保护 API 频控
+              扫描分组成员的下载目录和媒体库归档目录，建立文件索引并检查跨盘重复。
             </SheetDescription>
           </SheetHeader>
 
@@ -385,9 +440,23 @@ export function Codes() {
               </select>
             </div>
 
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium">本次扫描目录</p>
+                <Button asChild variant="outline" className="min-h-[44px]"><Link to="/storages">配置目录</Link></Button>
+              </div>
+              {pathsLoading && <p className="text-sm text-muted-foreground">加载扫描范围…</p>}
+              {pathsError && <p role="alert" className="text-sm text-destructive">{pathsError}</p>}
+              {!pathsLoading && !pathsError && !scanPaths.length && <p className="text-sm text-muted-foreground">尚无可扫描目录，请配置分组成员的下载与归档路径。</p>}
+              <ul className="max-h-48 space-y-2 overflow-y-auto">
+                {scanPaths.map((path) => <li key={path} className="break-all rounded-md bg-muted p-2 font-mono text-xs">{path}</li>)}
+              </ul>
+              <p className="text-xs text-muted-foreground">忽略节点自动跳过。扫描只更新索引，文件继续按你的目录规则存放。</p>
+            </div>
+
             <Button
               onClick={handleStartScan}
-              disabled={scanning}
+              disabled={scanning || pathsLoading || !scanPaths.length || Boolean(pathsError)}
               className="w-full min-h-[44px] text-base font-semibold gap-2"
             >
               {scanning ? (
@@ -413,18 +482,20 @@ export function Codes() {
                       variant={
                         scanStatus.status === 'completed'
                           ? 'success'
-                          : scanStatus.status === 'scanning'
+                          : scanStatus.status === 'scanning' || scanStatus.status === 'pending'
                           ? 'info'
                           : 'destructive'
                       }
                     >
                       {scanStatus.status === 'completed'
                         ? '已完成'
-                        : scanStatus.status === 'scanning'
+                        : scanStatus.status === 'scanning' || scanStatus.status === 'pending'
                         ? '进行中'
                         : '已终止'}
                     </Badge>
                   </div>
+
+                  {scanStatus.status === 'completed' && <p className="text-xs text-muted-foreground">待处理重复：{scanStatus.duplicates_found} 组，可在媒体库的跨盘查重面板中处理。</p>}
 
                   <div className="space-y-1">
                     <div className="flex justify-between text-slate-500">
