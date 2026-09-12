@@ -3,6 +3,13 @@ import type { ApiResponse } from '@/types/api'
 
 const TOKEN_KEY = 'kuroko_token'
 
+export class ApiRequestError extends Error {
+  constructor(message: string, public readonly status?: number, public readonly code?: number) {
+    super(message)
+    this.name = 'ApiRequestError'
+  }
+}
+
 export const apiClient = axios.create({
   baseURL: '/api/v1',
   timeout: 45000,
@@ -29,13 +36,14 @@ apiClient.interceptors.response.use(
     const body = response.data as ApiResponse<unknown>
     if (body && typeof body === 'object' && 'code' in body) {
       if (body.code !== 0 && body.code !== 200) {
-        return Promise.reject(new Error(body.message || `请求失败 (${body.code})`))
+        return Promise.reject(new ApiRequestError(body.message || `请求失败 (${body.code})`, response.status, body.code))
       }
       return response
     }
     return response
   },
   (error: AxiosError<ApiResponse<unknown>>) => {
+    if (axios.isCancel(error)) return Promise.reject(error)
     if (error.response?.status === 401) {
       localStorage.removeItem(TOKEN_KEY)
       // 非登录页且非初始化页时自动跳转回登录页
@@ -60,7 +68,7 @@ apiClient.interceptors.response.use(
       message = error.message
     }
 
-    return Promise.reject(new Error(message))
+    return Promise.reject(new ApiRequestError(message, error.response?.status, error.response?.data?.code))
   }
 )
 
@@ -75,4 +83,3 @@ export function setStoredToken(token: string): void {
 export function removeStoredToken(): void {
   localStorage.removeItem(TOKEN_KEY)
 }
-

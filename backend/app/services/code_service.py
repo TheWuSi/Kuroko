@@ -69,7 +69,12 @@ def _groups_for_job(db: Session, job: ScanJob, config: dict[str, Any]) -> list[d
     group = db.get(StorageGroup, job.group_id)
     if not group:
         return []
-    return [{"group_name": group.name, "paths": [{"storage_mount": item.storage_mount, "folder": item.folder_path} for item in group.paths]}]
+    return [
+        {
+            "group_name": group.name,
+            "paths": [{"storage_mount": item.storage_mount, "folder": item.folder_path} for item in group.paths],
+        }
+    ]
 
 
 def _walk_probe(client: Any, root: str):
@@ -130,10 +135,26 @@ def run_scan(task_id: str) -> None:
                     if not code:
                         continue
                     path = PurePosixPath(name)
-                    exists = db.query(CodeRecord).filter(CodeRecord.code == code, CodeRecord.storage_path == str(path.parent), CodeRecord.file_name == path.name).first()
+                    exists = (
+                        db.query(CodeRecord)
+                        .filter(
+                            CodeRecord.code == code,
+                            CodeRecord.storage_path == str(path.parent),
+                            CodeRecord.file_name == path.name,
+                        )
+                        .first()
+                    )
                     if exists:
                         continue
-                    db.add(CodeRecord(code=code, storage_path=str(path.parent), file_name=path.name, file_size=int(file.get("size") or file.get("length") or 0), source="scan"))
+                    db.add(
+                        CodeRecord(
+                            code=code,
+                            storage_path=str(path.parent),
+                            file_name=path.name,
+                            file_size=int(file.get("size") or file.get("length") or 0),
+                            source="scan",
+                        )
+                    )
                     job.new_codes_found += 1
                 processed_paths += 1
                 job.progress_percent = round(processed_paths / total_paths * 100, 2) if total_paths else 100

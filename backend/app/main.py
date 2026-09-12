@@ -5,18 +5,17 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.v1.router import router as api_router
 from app.core.config import get_settings
-from app.core.database import ensure_runtime_dirs, init_db
-from app.core.spa import mount_spa
+from app.core.database import SessionLocal, ensure_runtime_dirs, init_db
 from app.core.responses import ApiError
-from app.services.download_service import sync_tasks
-from app.core.database import SessionLocal
+from app.core.spa import mount_spa
 from app.services.code_service import recover_orphaned_scans
+from app.services.download_service import sync_tasks
 
 
 def _sync_in_worker() -> None:
@@ -37,7 +36,10 @@ async def _task_poller() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings = get_settings()
-    if settings.environment.lower() == "production" and settings.secret_key.get_secret_value() == "change-me-in-production":
+    if (
+        settings.environment.lower() == "production"
+        and settings.secret_key.get_secret_value() == "change-me-in-production"
+    ):
         raise RuntimeError("生产环境必须配置 KUROKO_SECRET_KEY")
     ensure_runtime_dirs()
     init_db()
@@ -52,6 +54,7 @@ async def lifespan(_: FastAPI):
     finally:
         poller.cancel()
         await asyncio.gather(poller, return_exceptions=True)
+
 
 app = FastAPI(
     title="Kuroko API",

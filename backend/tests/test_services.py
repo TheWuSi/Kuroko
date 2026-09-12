@@ -8,10 +8,17 @@ from app.services.storage_service import choose_target
 
 
 def test_metadata_client_normalizes_upstream_payload():
-    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={
-        "info_hash": "a" * 40, "name": "ABC-123", "size": 12,
-        "files": [{"path": "ABC-123/video.mkv", "size": 12}],
-    }))
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={
+                "info_hash": "a" * 40,
+                "name": "ABC-123",
+                "size": 12,
+                "files": [{"path": "ABC-123/video.mkv", "size": 12}],
+            },
+        )
+    )
     with MagnetMetadataApiClient("http://metadata:8080", transport=transport) as client:
         result = client.fetch_metadata("magnet:?xt=urn:btih:" + "a" * 40)
     assert result["metadata_fallback"] is False
@@ -23,9 +30,7 @@ def test_metadata_client_falls_back_on_timeout():
         raise httpx.ReadTimeout("timeout")
 
     with MagnetMetadataApiClient("http://metadata:8080", transport=httpx.MockTransport(fail)) as client:
-        result = client.parse_with_fallback(
-            "magnet:?xt=urn:btih:0123456789012345678901234567890123456789&dn=ABC-123"
-        )
+        result = client.parse_with_fallback("magnet:?xt=urn:btih:0123456789012345678901234567890123456789&dn=ABC-123")
     assert result["metadata_fallback"] is True
     assert result["fallback_reason"] == "bt_metadata_timeout"
     assert result["name"] == "ABC-123"

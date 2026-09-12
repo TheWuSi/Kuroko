@@ -26,6 +26,7 @@ import {
 } from 'lucide-react'
 import { storageService } from '@/services/storage.service'
 import { formatBytes } from '@/lib/format'
+import { joinStoragePath } from '@/lib/path'
 import { toast } from '@/stores/uiStore'
 import type { StorageNodeInfo, StorageGroup } from '@/types/api'
 
@@ -36,6 +37,7 @@ export function Storages() {
 
   // 手动配额弹窗
   const [overrideOpen, setOverrideOpen] = useState(false)
+  const [selectedStorageId, setSelectedStorageId] = useState<number | null>(null)
   const [selectedMount, setSelectedMount] = useState('')
   const [overrideGigabytes, setOverrideGigabytes] = useState<string>('1024')
 
@@ -51,8 +53,8 @@ export function Storages() {
     setLoading(true)
     try {
       const [storageRes, groupRes] = await Promise.all([
-        storageService.getStorages().catch(() => []),
-        storageService.getGroups().catch(() => []),
+        storageService.getStorages(),
+        storageService.getGroups(),
       ])
       setStorages(storageRes || [])
       setGroups(groupRes || [])
@@ -72,17 +74,19 @@ export function Storages() {
   const handleSaveOverride = async (e: React.FormEvent) => {
     e.preventDefault()
     const gb = parseFloat(overrideGigabytes)
-    if (isNaN(gb) || gb <= 0) {
+    const bytes = Math.round(gb * 1024 ** 3)
+    if (!Number.isFinite(gb) || gb <= 0 || !Number.isSafeInteger(bytes)) {
       toast.warning('请输入有效的容量数值')
       return
     }
 
+    if (selectedStorageId === null) return
     try {
-      const bytes = Math.round(gb * 1024 * 1024 * 1024)
-      await storageService.overrideStorageSpace(selectedMount, bytes)
-      toast.success(`挂载点 ${selectedMount} 总容量配额已更新`)
+      const updated = await storageService.overrideStorageSpace(selectedStorageId, bytes)
+      setStorages((previous) => previous.map((node) => node.id === updated.id ? updated : node))
+      if (updated.free_space === null) toast.warning(updated.space_error || '配额已保存，已用容量仍未知')
+      else toast.success(`挂载点 ${selectedMount} 总容量配额已更新`)
       setOverrideOpen(false)
-      loadData()
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '保存配额失败'
       toast.error(msg)
@@ -171,10 +175,11 @@ export function Storages() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {storages.map((node) => {
-              const total = node.total_space || 0
-              const free = node.free_space || 0
-              const used = node.used_space ?? (total - free)
-              const percent = total > 0 ? Math.round((used / total) * 100) : 0
+              const total = node.total_space
+              const free = node.free_space
+              const used = node.used_space
+              const percent = total !== null && total > 0 && used !== null
+                ? Math.min(100, Math.round((used / total) * 100)) : null
 
               return (
                 <Card key={node.id} className="border-slate-200 shadow-xs hover:shadow-md transition-all">
@@ -185,7 +190,7 @@ export function Storages() {
                           {node.mount_path}
                         </span>
                         <span className="text-xs text-slate-400 font-mono">
-                          驱动: {node.driver}
+                          驱动: {node.driver} · {node.status === 'work' ? '正常' : node.status}
                         </span>
                       </div>
                       <Badge
@@ -201,7 +206,7 @@ export function Storages() {
                         <span>已用: {formatBytes(used)}</span>
                         <span>剩余: {formatBytes(free)}</span>
                       </div>
-                      <Progress
+                      {percent !== null && <Progress
                         value={percent}
                         indicatorClassName={
                           percent > 90
@@ -210,11 +215,12 @@ export function Storages() {
                             ? 'bg-amber-500'
                             : 'bg-blue-600'
                         }
-                      />
+                      />}
                       <div className="flex justify-between text-[11px] text-slate-400">
                         <span>总容量: {formatBytes(total)}</span>
-                        <span>占用 {percent}%</span>
+                        <span>{percent === null ? '占用比例未知' : `占用 ${percent}%`}</span>
                       </div>
+                      {free === null && <p className="text-xs text-muted-foreground">{node.space_error || '剩余容量未知'}。不参与自动调度，仍可指定此目录下载。</p>}
                     </div>
 
                     <div className="pt-2 border-t border-slate-100 flex justify-end">
@@ -222,11 +228,12 @@ export function Storages() {
                         variant="ghost"
                         size="sm"
                         onClick={() => {
+                          setSelectedStorageId(node.id)
                           setSelectedMount(node.mount_path)
-                          setOverrideGigabytes(total > 0 ? (total / (1024 ** 3)).toString() : '1024')
+                          setOverrideGigabytes(total !== null && total > 0 ? (total / (1024 ** 3)).toString() : '1024')
                           setOverrideOpen(true)
                         }}
-                        className="text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 h-8 gap-1"
+                        className="min-h-[44px] text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 gap-1"
                       >
                         <Sliders className="h-3.5 w-3.5" />
                         手动校准容量
@@ -248,7 +255,7 @@ export function Storages() {
             存储分组编排 ({groups.length})
           </h2>
           <span className="text-xs text-slate-400">
-            下载时指定分组，系统将自动使用组内剩余空间最小的节点以榨干碎片
+            按完整下载大小，优先选择容量已知且空间足够的最小节点
           </span>
         </div>
 
@@ -310,7 +317,7 @@ export function Storages() {
                         className="p-2 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between truncate"
                       >
                         <span className="truncate">
-                          {path.storage_mount}{path.folder_path}
+                          {joinStoragePath(path.storage_mount, path.folder_path)}
                         </span>
                       </div>
                     ))}
@@ -328,7 +335,7 @@ export function Storages() {
           <DialogHeader>
             <DialogTitle>手动设定存储配额</DialogTitle>
             <DialogDescription>
-              挂载点 <span className="font-mono font-semibold text-slate-900">{selectedMount}</span> 未能通过 OpenList 接口原生返回容量时，可在此手动指定总空间，系统将根据已有文件累计体积推算剩余空间。
+              挂载点 <span className="font-mono font-semibold">{selectedMount}</span> 可手动指定总容量。系统优先读取原生用量，必要时统计此挂载内文件；统计不完整或存在嵌套挂载时，剩余容量保持未知。
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSaveOverride} className="space-y-4 mt-2">

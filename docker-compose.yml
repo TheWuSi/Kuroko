@@ -1,6 +1,7 @@
 services:
   kuroko:
-    image: ${KUROKO_IMAGE:-ghcr.io/example/kuroko:latest}
+    image: ${KUROKO_IMAGE:-kuroko:local}
+    build: .
     container_name: kuroko
     restart: unless-stopped
     ports:
@@ -17,27 +18,47 @@ services:
       - KUROKO_TASK_POLL_SECONDS=${KUROKO_TASK_POLL_SECONDS:-30}
       - KUROKO_CORS_ORIGINS=${KUROKO_CORS_ORIGINS:-http://localhost:8000}
       - KUROKO_BT_PARSER_SERVICE_URL=${BT_PARSER_SERVICE_URL:-http://magnet-metadata-api:8080}
+      - KUROKO_OPENLIST_BASE_URL=${OPENLIST_BASE_URL:-}
     depends_on:
       magnet-metadata-api:
-        condition: service_started
+        condition: service_healthy
 
   magnet-metadata-api:
-    image: ${METADATA_API_IMAGE:-felipemarinho97/magnet-metadata-api:latest}
+    image: ${METADATA_API_IMAGE:-felipemarinho97/magnet-metadata-api:0.1.0}
     container_name: kuroko-magnet-metadata
     restart: unless-stopped
     ports:
-      - "${METADATA_API_PORT:-8080}:8080"
+      - "127.0.0.1:${METADATA_API_PORT:-8080}:8080"
+      - "${METADATA_CLIENT_PORT:-42069}:${METADATA_CLIENT_PORT:-42069}/tcp"
+      - "${METADATA_CLIENT_PORT:-42069}:${METADATA_CLIENT_PORT:-42069}/udp"
+    volumes:
+      - ${METADATA_CACHE_DIR:-./data/metadata}:/app/cache
     environment:
       - PORT=8080
       - REDIS_URL=redis://redis:6379/0
-      - CACHE_TTL_HOURS=${CACHE_TTL_HOURS:-168}
+      - CACHE_DIR=/app/cache
+      - CLIENT_PORT=${METADATA_CLIENT_PORT:-42069}
+      - ENABLE_DOWNLOADS=false
+      - SEEDING_ENABLED=false
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "4", "-O", "/dev/null", "http://127.0.0.1:8080/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     depends_on:
       redis:
-        condition: service_started
+        condition: service_healthy
 
   redis:
     image: redis:7-alpine
     container_name: kuroko-redis
     restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - ${REDIS_DATA_DIR:-./data/redis}:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3

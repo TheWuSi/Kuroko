@@ -105,14 +105,49 @@ def test_directory_does_not_accept_partial_results_or_traversal(content, total):
             client.list_files("/media")
 
 
+@pytest.mark.parametrize("mode", ["duplicate", "changed_total", "overflow"])
+def test_inconsistent_pagination_is_rejected(mode):
+    def handler(request):
+        page = json.loads(request.content)["page"]
+        name = "same.mkv" if mode == "duplicate" else f"file-{page}.mkv"
+        total = 0 if mode == "overflow" else 3 if page == 1 else 2 if mode == "changed_total" else 3
+        return ok({"content": [{"name": name, "is_dir": False, "size": 1}], "total": total})
+
+    with openlist(handler) as client, pytest.raises(OpenListError):
+        client.list_files("/media")
+
+
+def test_empty_page_arriving_after_budget_is_not_accepted_as_zero_usage(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr("app.services.openlist_client.time.monotonic", lambda: clock[0])
+
+    def handler(request):
+        clock[0] = 2.0
+        return ok({"content": [], "total": 0})
+
+    with openlist(handler) as client, pytest.raises(OpenListError, match="时间预算"):
+        client.list_files("/media", deadline=1.0)
+
+
 def test_storage_list_preserves_ids_and_mount_details_without_exposing_addition():
     def handler(request):
         assert dict(request.url.params) == {"page": "1", "per_page": "100"}
-        return ok({"total": 1, "content": [{
-            "id": 73, "mount_path": "/cloud/nested", "driver": "PikPak", "status": "work", "disabled": False,
-            "addition": '{"password":"do-not-expose"}',
-            "mount_details": {"total_space": 1000, "used_space": 300, "free_space": 700},
-        }]})
+        return ok(
+            {
+                "total": 1,
+                "content": [
+                    {
+                        "id": 73,
+                        "mount_path": "/cloud/nested",
+                        "driver": "PikPak",
+                        "status": "work",
+                        "disabled": False,
+                        "addition": '{"password":"do-not-expose"}',
+                        "mount_details": {"total_space": 1000, "used_space": 300, "free_space": 700},
+                    }
+                ],
+            }
+        )
 
     with openlist(handler) as client:
         storage = client.get_storage_info()[0]
@@ -132,7 +167,9 @@ def test_download_contract_uses_exact_tool_policy_directory_and_tasks_array():
         return ok({"tasks": [{"id": "openlist-task-42", "state": 0, "progress": 0}]})
 
     with openlist(handler) as client:
-        assert client.add_offline_download(MAGNET + "&tr=https://tracker.test", "/cloud/Downloads") == "openlist-task-42"
+        assert (
+            client.add_offline_download(MAGNET + "&tr=https://tracker.test", "/cloud/Downloads") == "openlist-task-42"
+        )
 
 
 @pytest.mark.parametrize("malformed", [False, True])
@@ -151,6 +188,14 @@ def test_uncertain_submission_is_not_retried(malformed):
     assert exc.value.outcome_unknown is True
     assert len(calls) == 1
     assert "secret-upstream-url" not in str(exc.value)
+
+
+def test_gateway_failure_during_submission_keeps_unknown_outcome():
+    with openlist(lambda request: httpx.Response(502, text="private-gateway-body")) as client:
+        with pytest.raises(OpenListError) as error:
+            client.add_offline_download(MAGNET, "/drive/Video")
+    assert error.value.outcome_unknown is True
+    assert "private-gateway-body" not in str(error.value)
 
 
 def test_task_lists_info_and_cancel_use_category_and_query_tid():
@@ -184,10 +229,18 @@ def test_metadata_request_and_multifile_response():
         assert request.method == "POST" and request.url.path == "/prefix/api/v1/metadata"
         assert "authorization" not in request.headers
         assert set(json.loads(request.content)) == {"magnet_uri"}
-        return httpx.Response(200, json={
-            "info_hash": HASH, "name": "ABC-123", "size": 101,
-            "files": [{"path": "video.mkv", "size": 100, "offset": 0}, {"path": "readme.txt", "size": 1, "offset": 100}],
-        })
+        return httpx.Response(
+            200,
+            json={
+                "info_hash": HASH,
+                "name": "ABC-123",
+                "size": 101,
+                "files": [
+                    {"path": "video.mkv", "size": 100, "offset": 0},
+                    {"path": "readme.txt", "size": 1, "offset": 100},
+                ],
+            },
+        )
 
     with metadata(handler) as client:
         result = client.fetch_metadata(MAGNET)
@@ -196,21 +249,32 @@ def test_metadata_request_and_multifile_response():
 
 
 def test_single_file_torrent_uses_name_and_size():
-    with metadata(lambda request: httpx.Response(200, json={
-        "info_hash": HASH, "name": "ABC-123.mkv", "size": 42, "files": [],
-    })) as client:
+    with metadata(
+        lambda request: httpx.Response(
+            200,
+            json={
+                "info_hash": HASH,
+                "name": "ABC-123.mkv",
+                "size": 42,
+                "files": [],
+            },
+        )
+    ) as client:
         result = client.fetch_metadata(MAGNET)
     assert result["files"] == [{"name": "ABC-123.mkv", "path": "ABC-123.mkv", "size": 42, "offset": 0}]
 
 
-@pytest.mark.parametrize("change", [
-    {"info_hash": "f" * 40},
-    {"files": [{"path": "../escape.mkv", "size": 42}]},
-    {"files": [{"path": "video.mkv", "size": -1}]},
-    {"files": [{"path": "video.mkv", "size": "42"}]},
-    {"files": [{"path": "video.mkv", "size": 41}]},
-    {"size": True},
-])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"info_hash": "f" * 40},
+        {"files": [{"path": "../escape.mkv", "size": 42}]},
+        {"files": [{"path": "video.mkv", "size": -1}]},
+        {"files": [{"path": "video.mkv", "size": "42"}]},
+        {"files": [{"path": "video.mkv", "size": 41}]},
+        {"size": True},
+    ],
+)
 def test_invalid_metadata_is_reported_as_fallback_not_success(change):
     payload = {"info_hash": HASH, "name": "ABC-123.mkv", "size": 42, "files": [], **change}
     with metadata(lambda request: httpx.Response(200, json=payload)) as client:
@@ -220,7 +284,10 @@ def test_invalid_metadata_is_reported_as_fallback_not_success(change):
     assert result["files"] == []
 
 
-@pytest.mark.parametrize("status,reason", [(504, "bt_metadata_timeout"), (500, "bt_metadata_unavailable"), (400, "bt_metadata_invalid_request")])
+@pytest.mark.parametrize(
+    "status,reason",
+    [(504, "bt_metadata_timeout"), (500, "bt_metadata_unavailable"), (400, "bt_metadata_invalid_request")],
+)
 def test_metadata_http_errors_have_distinct_fallback_reasons(status, reason):
     with metadata(lambda request: httpx.Response(status, json={"error": "failure"})) as client:
         assert client.parse_with_fallback(MAGNET)["fallback_reason"] == reason
@@ -229,7 +296,9 @@ def test_metadata_http_errors_have_distinct_fallback_reasons(status, reason):
 def test_health_uses_real_endpoint_and_returns_only_actual_statistics():
     def handler(request):
         assert request.method == "GET" and request.url.path == "/prefix/api/v1/health"
-        return httpx.Response(200, json={"status": "ok", "stats": {"active_torrents": 3, "active_locks": 1, "cache_dir": "/private"}})
+        return httpx.Response(
+            200, json={"status": "ok", "stats": {"active_torrents": 3, "active_locks": 1, "cache_dir": "/private"}}
+        )
 
     with metadata(handler) as client:
         result = client.test_connection()
@@ -237,11 +306,14 @@ def test_health_uses_real_endpoint_and_returns_only_actual_statistics():
     assert "dht_connected" not in result
 
 
-@pytest.mark.parametrize("response", [
-    httpx.Response(200, text="<html>fallback</html>"),
-    httpx.Response(200, json={"status": "error", "stats": {}}),
-    httpx.Response(404),
-])
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(200, text="<html>fallback</html>"),
+        httpx.Response(200, json={"status": "error", "stats": {}}),
+        httpx.Response(404),
+    ],
+)
 def test_health_does_not_accept_a_spa_or_invalid_health_response(response):
     with metadata(lambda request: response) as client:
         with pytest.raises(MagnetMetadataError):

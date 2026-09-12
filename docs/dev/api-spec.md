@@ -17,7 +17,7 @@
 
 ### 1.2 认证与鉴权 (Authentication)
 - 系统使用 **Bearer Token (JWT)** 进行接口认证。
-- 除登录接口 (`/api/v1/auth/login`) 外，所有请求均须在 HTTP Header 中携带身份令牌：
+- 登录、首次初始化/初始化状态与健康检查接口公开；业务接口须在 HTTP Header 中携带身份令牌：
   ```http
   Authorization: Bearer <your_jwt_token>
   ```
@@ -55,7 +55,7 @@ HTTP 状态码相应为 `4xx` 或 `5xx`。
 | :--- | :--- | :--- |
 | `code` | integer | 业务错误码（非 0，具体见业务错误码清单） |
 | `message` | string | 错误详细描述信息，前端可直接展示 |
-| `data` | null | 发生错误时固定为 `null` |
+| `data` | null / array | 一般为 null；422 验证错误只包含字段位置与错误类型，不回显输入 |
 
 ---
 
@@ -79,8 +79,6 @@ HTTP 状态码相应为 `4xx` 或 `5xx`。
 | :--- | :--- |
 | `0` | 成功 (Success) |
 | `40001` | 请求参数缺失或格式校验不通过 |
-| `40002` | 非法的磁力链接格式 |
-| `40003` | 目标存储空间不足 |
 | `40101` | 用户名或密码错误 |
 | `40102` | Token 缺失、无效或已过期 |
 | `40301` | 无权访问该资源 |
@@ -89,7 +87,6 @@ HTTP 状态码相应为 `4xx` 或 `5xx`。
 | `50001` | 系统未知内部异常 |
 | `50201` | OpenList 接口调用失败或未连接 |
 | `50202` | BT 解析服务不可用或解析超时 |
-| `50203` | OpenList 离线下载任务提交失败 |
 
 ---
 
@@ -202,428 +199,220 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
 ## 4. 模块 2: 磁力链接 (Magnet)
 
 ### 4.1 解析磁力链接
-- **路径**：`POST /api/v1/magnets/parse`
-- **认证**：需要 Bearer Token
-- **描述**：接收多个磁力链接，自动清理 tracker 参数、通过 `dn` 提取番号代码、调用后端/外部 BT 解析服务获取种子文件清单，并基于文件后缀、大小及黑名单规则进行过滤；同时与现有媒体库比对判断是否已下载。
 
-#### 请求参数 (Body)
-| 字段 | 类型 | 必选 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `magnet_links` | array[string] | 是 | 原始磁力链接数组，支持批量解析 |
+`POST /api/v1/magnets/parse`，需要 Kuroko JWT Bearer 认证。
 
-#### 请求示例
-```bash
-curl -X POST "http://localhost:8000/api/v1/magnets/parse" \
-  -H "Authorization: Bearer <your_jwt_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "magnet_links": [
-      "magnet:?xt=urn:btih:3b84175de6fbc02187f5d47e4b92b6a782b260f7&dn=ABC-123&tr=http://tracker.example.com/announce",
-      "magnet:?xt=urn:btih:d3b07384d113edec49eaa6238ad5ff00&dn=DEF-456"
-    ]
-  }'
+请求包含 1～100 条 `magnet_links`，每条最多 8192 字符。Hash 仅接受 40 位十六进制或 32 位 Base32，规范化为小写十六进制。后端保留原始输入，清洗结果仅含 `xt/dn`。
+
+```json
+{
+  "magnet_links": [
+    "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=ABC-123"
+  ]
+}
 ```
 
-#### 响应示例 (成功)
+成功响应：
+
 ```json
 {
   "code": 0,
   "message": "success",
   "data": {
-    "results": [
-      {
-        "original_magnet": "magnet:?xt=urn:btih:3b84175de6fbc02187f5d47e4b92b6a782b260f7&dn=ABC-123&tr=http://tracker.example.com/announce",
-        "cleaned_magnet": "magnet:?xt=urn:btih:3b84175de6fbc02187f5d47e4b92b6a782b260f7&dn=ABC-123",
-        "dn_code": "ABC-123",
-        "verified_code": "ABC-123",
-        "total_files_count": 2,
-        "files": [
-          {
-            "name": "ABC-123.mp4",
-            "size": 1073741824,
-            "filtered": false
-          }
-        ],
-        "filtered_files": [
-          {
-            "name": "promo_ad.txt",
-            "size": 1024,
-            "filtered": true,
-            "filter_reason": "extension"
-          }
-        ],
-        "exists_in_library": true,
-        "existing_location": "/OD/Video1/ABC-123.mp4"
-      },
-      {
-        "original_magnet": "magnet:?xt=urn:btih:d3b07384d113edec49eaa6238ad5ff00&dn=DEF-456",
-        "cleaned_magnet": "magnet:?xt=urn:btih:d3b07384d113edec49eaa6238ad5ff00&dn=DEF-456",
-        "dn_code": "DEF-456",
-        "verified_code": "DEF-456",
-        "total_files_count": 1,
-        "files": [
-          {
-            "name": "DEF-456.mkv",
-            "size": 2147483648,
-            "filtered": false
-          }
-        ],
-        "filtered_files": [],
-        "exists_in_library": false,
-        "existing_location": null
-      }
-    ]
+    "results": [{
+      "original_magnet": "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=ABC-123",
+      "cleaned_magnet": "magnet:?xt=urn%3Abtih%3A0123456789abcdef0123456789abcdef01234567&dn=ABC-123",
+      "info_hash": "0123456789abcdef0123456789abcdef01234567",
+      "dn_code": "ABC-123",
+      "verified_code": "ABC-123",
+      "total_files_count": 2,
+      "total_size": 1073742848,
+      "files": [{"name": "ABC-123.mkv", "size": 1073741824, "filtered": false}],
+      "filtered_files": [{"name": "readme.txt", "size": 1024, "filtered": true, "filter_reason": "extension"}],
+      "exists_in_library": false,
+      "existing_location": null,
+      "metadata_fallback": false,
+      "fallback_reason": null,
+      "metadata_name": "ABC-123"
+    }]
   }
 }
 ```
 
----
+`total_size` 是整个种子的大小，包含过滤文件；过滤只用于番号提取和展示，不影响实际下载。元数据不可用时返回空文件列表、`total_size: 0`、`metadata_fallback: true`；此时 0 表示未知大小。`fallback_reason` 为 `bt_metadata_timeout`、`bt_metadata_unavailable`、`bt_metadata_invalid_request` 或 `bt_metadata_invalid_response`。
 
-### 4.2 批量提交离线下载任务
-- **路径**：`POST /api/v1/magnets/batch-download`
-- **认证**：需要 Bearer Token
-- **描述**：将选定的磁力任务提交至离线下载队列。系统会根据指定的存储分组执行**碎片空间优先算法 (Best-Fit Minimal Remainder)**，在满足文件容量的候选节点中优先选择剩余空间最小的存储节点，并将下载任务提交至 OpenList 客户端（引擎固定为 PikPak，删除策略固定为总是删除）。若番号在库中已存在且 `force` 为 `false`，则自动拦截并放入 `skipped` 队列；若 `force` 为 `true`，则显式绕过去重拦截强制触发下载（适用于字幕版、高清版）。
+前端最多并发四条单磁力请求，保持输入顺序，单条等待时间高于后端最高 300 秒解析超时，并支持 AbortSignal。
 
-#### 请求参数 (Body)
+### 4.2 批量提交离线下载
+
+`POST /api/v1/magnets/batch-download`，需要认证。
+
 | 字段 | 类型 | 必选 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `tasks` | array[object] | 是 | 任务列表 |
-| `tasks[].magnet` | string | 是 | 磁力链接（推荐使用 cleaned_magnet） |
-| `tasks[].code` | string | 是 | 识别的番号代码，如 `"ABC-123"` |
-| `tasks[].force` | boolean | 否 | 是否强制重新下载（若已存在），默认为 `false` |
-| `tasks[].target_group` | string / integer | 否 | 目标存储分组名称或 ID，不传则使用系统默认分组 |
+| `tasks` | array | 是 | 1～100 个任务 |
+| `tasks[].magnet` | string | 是 | 有效磁力链接 |
+| `tasks[].code` | string | 是 | 1～64 字符，禁止目录分隔符、控制字符与 `..` |
+| `tasks[].force` | boolean | 否 | 默认 false，绕过番号库去重；不绕过同磁力同目录待处理任务检查 |
+| `tasks[].target_path` | string | 否 | OpenList 绝对目录，最多 1024 字符，优先于分组 |
+| `tasks[].target_group` | string / integer | 否 | 分组名称或 ID，目录留空时生效；省略使用 ID 最小的分组 |
+| `tasks[].total_size` | integer | 否 | 兼容旧客户端；不会作为调度依据 |
 
-#### 请求示例
-```bash
-curl -X POST "http://localhost:8000/api/v1/magnets/batch-download" \
-  -H "Authorization: Bearer <your_jwt_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tasks": [
-      {
-        "magnet": "magnet:?xt=urn:btih:d3b07384d113edec49eaa6238ad5ff00&dn=DEF-456",
-        "code": "DEF-456",
-        "force": false,
-        "target_group": "group-1"
-      },
-      {
-        "magnet": "magnet:?xt=urn:btih:3b84175de6fbc02187f5d47e4b92b6a782b260f7&dn=ABC-123",
-        "code": "ABC-123",
-        "force": false,
-        "target_group": "group-1"
-      }
-    ]
-  }'
-```
-
-#### 响应示例 (成功)
 ```json
 {
-  "code": 0,
-  "message": "success",
-  "data": {
-    "submitted": [
-      {
-        "code": "DEF-456",
-        "task_id": "4b7b2520-7b5c-4433-85f2-1bfa4430e7bb",
-        "target_path": "/OD/Video1",
-        "openlist_task_id": "op-task-88992"
-      }
-    ],
-    "skipped": [
-      {
-        "code": "ABC-123",
-        "reason": "already_exists",
-        "existing_location": "/OD/Video1/ABC-123.mp4"
-      }
-    ]
-  }
-}
-```
-
----
-
-## 5. 模块 3: 下载任务 (Tasks)
-
-### 5.1 获取所有下载任务列表
-- **路径**：`GET /api/v1/tasks`
-- **认证**：需要 Bearer Token
-- **描述**：分页获取下载任务列表，支持按任务运行状态过滤。
-
-#### 查询参数 (Query)
-| 字段 | 类型 | 必选 | 默认值 | 说明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `status` | string | 否 | `null` | 任务状态筛选：`pending`, `downloading`, `completed`, `failed`, `cancelled` |
-| `page` | integer | 否 | `1` | 当前页码，起始为 1 |
-| `page_size` | integer | 否 | `20` | 每页记录数，最大不超过 100 |
-
-#### 请求示例
-```bash
-curl -X GET "http://localhost:8000/api/v1/tasks?status=downloading&page=1&page_size=20" \
-  -H "Authorization: Bearer <your_jwt_token>"
-```
-
-#### 响应示例 (成功)
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "total": 1,
-    "page": 1,
-    "page_size": 20,
-    "items": [
-      {
-        "task_id": "4b7b2520-7b5c-4433-85f2-1bfa4430e7bb",
-        "openlist_task_id": "op-task-88992",
-        "code": "ABC-123",
-        "magnet": "magnet:?xt=urn:btih:3b84175de6fbc02187f5d47e4b92b6a782b260f7&dn=ABC-123",
-        "status": "downloading",
-        "progress": 45.5,
-        "speed": "2.4 MB/s",
-        "target_path": "/OD/Video1",
-        "total_size": 1073741824,
-        "downloaded_size": 488552529,
-        "error_message": null,
-        "created_at": "2026-09-06T19:30:00Z",
-        "updated_at": "2026-09-06T19:45:00Z"
-      }
-    ]
-  }
-}
-```
-
----
-
-### 5.2 获取单个任务详情
-- **路径**：`GET /api/v1/tasks/{task_id}`
-- **认证**：需要 Bearer Token
-- **描述**：根据任务 UUID 查询具体任务的详细状态信息。
-
-#### 路径参数 (Path)
-| 字段 | 类型 | 必选 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `task_id` | string | 是 | 任务唯一标识 UUID |
-
-#### 请求示例
-```bash
-curl -X GET "http://localhost:8000/api/v1/tasks/4b7b2520-7b5c-4433-85f2-1bfa4430e7bb" \
-  -H "Authorization: Bearer <your_jwt_token>"
-```
-
-#### 响应示例 (成功)
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "task_id": "4b7b2520-7b5c-4433-85f2-1bfa4430e7bb",
-    "openlist_task_id": "op-task-88992",
+  "tasks": [{
+    "magnet": "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=ABC-123",
     "code": "ABC-123",
-    "magnet": "magnet:?xt=urn:btih:3b84175de6fbc02187f5d47e4b92b6a782b260f7&dn=ABC-123",
-    "status": "downloading",
-    "progress": 45.5,
-    "speed": "2.4 MB/s",
-    "target_path": "/OD/Video1",
-    "total_size": 1073741824,
-    "downloaded_size": 488552529,
-    "error_message": null,
-    "created_at": "2026-09-06T19:30:00Z",
-    "updated_at": "2026-09-06T19:45:00Z"
-  }
+    "target_path": "/OD/Video",
+    "force": false
+  }]
 }
 ```
 
-#### 响应示例 (404 错误)
-```json
-{
-  "code": 40401,
-  "message": "任务不存在: 4b7b2520-7b5c-4433-85f2-1bfa4430e7bb",
-  "data": null
-}
-```
+直接使用 `/OD/Video`，不添加番号或任务 ID 目录，不做文件整理。目录须属于正常工作的挂载，目标路径须可使用 PikPak；目录不存在时交 OpenList 创建。指定目录允许元数据降级，自动调度则必须由后端取得完整正数大小，并排除容量未知的节点。
 
----
+业务响应始终包含三个列表；单项失败不回滚之前已提交的任务：
 
-### 5.3 取消/删除下载任务
-- **路径**：`DELETE /api/v1/tasks/{task_id}`
-- **认证**：需要 Bearer Token
-- **描述**：取消并删除指定的下载任务。系统将调用 OpenList API 中止下载流程并清理临时记录。
-
-#### 路径参数 (Path)
-| 字段 | 类型 | 必选 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `task_id` | string | 是 | 任务唯一标识 UUID |
-
-#### 查询参数 (Query)
-| 字段 | 类型 | 必选 | 默认值 | 说明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `delete_files` | boolean | 否 | `false` | 是否同时删除已产生的未完成临时文件 |
-
-#### 请求示例
-```bash
-curl -X DELETE "http://localhost:8000/api/v1/tasks/4b7b2520-7b5c-4433-85f2-1bfa4430e7bb?delete_files=true" \
-  -H "Authorization: Bearer <your_jwt_token>"
-```
-
-#### 响应示例 (成功)
 ```json
 {
   "code": 0,
   "message": "success",
   "data": {
-    "task_id": "4b7b2520-7b5c-4433-85f2-1bfa4430e7bb",
-    "status": "cancelled",
-    "deleted": true
+    "submitted": [{
+      "index": 0,
+      "magnet": "magnet:?xt=urn%3Abtih%3A0123456789abcdef0123456789abcdef01234567&dn=ABC-123",
+      "code": "ABC-123",
+      "task_id": "4b7b2520-7b5c-4433-85f2-1bfa4430e7bb",
+      "target_path": "/OD/Video",
+      "openlist_task_id": "openlist-task-42",
+      "total_size": 1073742848,
+      "metadata_fallback": false
+    }],
+    "skipped": [],
+    "failed": []
   }
 }
 ```
 
----
+`skipped` 项包含 `index/magnet/code/reason/existing_location`，`reason` 为 `already_exists` 或 `already_submitted`，后者附带已有 `task_id`。`failed` 项包含 `index/magnet/code/task_id/message/reason`，原因包括 `invalid_target`、`upstream_error`、`submission_unknown`。
 
-### 5.4 手动同步 OpenList 离线下载进度
-- **路径**：`POST /api/v1/tasks/sync`
-- **认证**：需要 Bearer Token
-- **描述**：主动触发从 OpenList 后端拉取所有离线下载任务的最新进度与状态，更新本地数据库记录并完成归档（若已下载完成）。
+提交结果未知时，本地保留无上游 ID 的待处理记录；先核对 OpenList，禁止自动重试。提交成功仅代表离线任务已创建，不代表已入库。前端逐条提交并合并结果，服务端保守计入此前尚在等待/下载的任务容量。
 
-#### 请求参数
-无
+## 5. 模块 3: 下载与转存任务 (Tasks)
 
-#### 请求示例
-```bash
-curl -X POST "http://localhost:8000/api/v1/tasks/sync" \
-  -H "Authorization: Bearer <your_jwt_token>"
-```
+### 5.1 获取离线任务
 
-#### 响应示例 (成功)
+`GET /api/v1/tasks` 支持 `status`、`page`（默认 1）、`page_size`（默认 20，1～100）。响应 `data` 为 `{total, page, page_size, items}`。
+
+`GET /api/v1/tasks/{task_id}` 返回单个本地离线任务，示例 `data`：
+
 ```json
 {
-  "code": 0,
-  "message": "success",
-  "data": {
-    "synced_count": 2,
-    "updated_tasks": [
-      {
-        "task_id": "4b7b2520-7b5c-4433-85f2-1bfa4430e7bb",
-        "code": "ABC-123",
-        "status": "completed",
-        "progress": 100.0,
-        "updated_at": "2026-09-06T19:50:00Z"
-      },
-      {
-        "task_id": "8f12cc20-1122-3344-5566-778899aabbcc",
-        "code": "DEF-456",
-        "status": "downloading",
-        "progress": 72.3,
-        "updated_at": "2026-09-06T19:50:00Z"
-      }
-    ]
-  }
+  "task_id": "4b7b2520-7b5c-4433-85f2-1bfa4430e7bb",
+  "openlist_task_id": "openlist-task-42",
+  "code": "ABC-123",
+  "magnet": "magnet:?xt=urn%3Abtih%3A0123456789abcdef0123456789abcdef01234567&dn=ABC-123",
+  "status": "downloading",
+  "progress": 25.0,
+  "speed": null,
+  "total_size": 1073741824,
+  "downloaded_size": 268435456,
+  "downloaded_size_is_estimate": true,
+  "phase": "offline_download",
+  "target_path": "/OD/Video",
+  "error_message": null,
+  "created_at": "2026-09-12T10:00:00",
+  "updated_at": "2026-09-12T10:01:00"
 }
 ```
 
----
+`speed` 为 null 时显示未知；下载字节数按进度估算。离线任务 `completed` 仅表示离线阶段结束。缺失上游任务保留本地状态并显示可能被清理的提示。
+
+### 5.2 手动同步
+
+`POST /api/v1/tasks/sync`，无请求体。返回 `synced_count`（本次同步的全部任务数）、`completed_count`（其中本次确认离线完成的数量）与 `updated_tasks`（结构同 5.1）。后台默认每 30 秒同步，前端每 10 秒刷新本地结果；也可手动触发。
+
+同步不生成番号文件记录，不推测真实文件名或跨盘转存结果。
+
+### 5.3 取消离线任务
+
+`DELETE /api/v1/tasks/{task_id}` 仅发送取消请求，不删除记录或文件。成功时 `data` 示例：
+
+```json
+{
+  "task_id": "4b7b2520-7b5c-4433-85f2-1bfa4430e7bb",
+  "status": "downloading",
+  "cancel_requested": true,
+  "deleted": false
+}
+```
+
+等待上游确认后才变更为 `cancelled`。已结束任务返回 HTTP 409；已取消任务可返回 `cancel_requested: false`。`delete_files=true` 返回 HTTP 400。上游取消失败时本地状态不变；提交结果尚未确认的任务须先在 OpenList 核实。
+
+### 5.4 独立转存列表
+
+`GET /api/v1/tasks/transfers` 返回当前 OpenList 账号可见的全部离线转存任务。响应 `data` 为 `{items: [...]}`，单项包含：
+
+```json
+{
+  "task_id": "transfer-42",
+  "name": "转存到 /OD/Video/ABC-123.mkv",
+  "phase": "offline_download_transfer",
+  "state": 1,
+  "status": "downloading",
+  "status_detail": "转存中",
+  "progress": 25.0,
+  "total_size": 1073741824,
+  "downloaded_size": 268435456,
+  "downloaded_size_is_estimate": true,
+  "error_message": null,
+  "start_time": "2026-09-12T10:00:00Z",
+  "end_time": null
+}
+```
+
+不提供猜测的父任务关联。`DELETE /api/v1/tasks/transfers/{task_id}` 取消指定转存任务，返回 `{task_id, cancel_requested: true, deleted: false}`；终态返回 HTTP 409。所有任务接口均需要认证。
 
 ## 6. 模块 4: 存储管理 (Storage)
 
-### 6.1 获取所有存储节点信息
-- **路径**：`GET /api/v1/storages`
-- **认证**：需要 Bearer Token
-- **描述**：从 OpenList 获取当前所有已挂载的存储节点列表，并综合本地空间统计信息，展示存储容量、剩余空间及配额获取来源。
+### 6.1 存储列表
 
-#### 请求参数
-无
+`GET /api/v1/storages` 返回 `data.storages` 数组，使用 OpenList 的真实存储 ID。
 
-#### 请求示例
-```bash
-curl -X GET "http://localhost:8000/api/v1/storages" \
-  -H "Authorization: Bearer <your_jwt_token>"
-```
-
-#### 响应示例 (成功)
 ```json
 {
   "code": 0,
   "message": "success",
   "data": {
-    "storages": [
-      {
-        "id": 1,
-        "mount_path": "/OD",
-        "driver": "PikPak",
-        "status": "active",
-        "total_space": 16106127360,
-        "used_space": 10737418240,
-        "free_space": 5368709120,
-        "space_source": "openlist",
-        "modified_at": "2026-09-06T18:00:00Z"
-      },
-      {
-        "id": 2,
-        "mount_path": "/OD1",
-        "driver": "PikPak",
-        "status": "active",
-        "total_space": 21474836480,
-        "used_space": 12884901888,
-        "free_space": 8589934592,
-        "space_source": "manual",
-        "modified_at": "2026-09-06T18:20:00Z"
-      }
-    ]
+    "storages": [{
+      "id": 73,
+      "mount_path": "/OD",
+      "driver": "Onedrive",
+      "status": "work",
+      "total_space": 1099511627776,
+      "used_space": null,
+      "free_space": null,
+      "space_source": "manual",
+      "space_error": "手动配额已保存，但目录用量统计失败：OpenList 权限不足"
+    }]
   }
 }
 ```
-> **字段说明**：
-> - `space_source`：空间来源枚举，`"openlist"` 表示由 OpenList API 自动汇报；`"manual"` 表示由用户手动覆盖标记。
 
----
+`status` 为 `work/disabled/error`，容量未知用 null 表示，前端不得显示成 0 B 或假百分比。`space_error` 为容量不可用的具体原因，可为 null。驱动的 `total_space=0` 不作为有效总配额，兼容 GoogleDrive 的无限配额。
 
-### 6.2 手动标记存储库总空间
-- **路径**：`PUT /api/v1/storages/{storage_id}/space`
-- **认证**：需要 Bearer Token
-- **描述**：针对部分网盘驱动无法通过 OpenList 准确获取总容量的情况，允许管理员手动设置该存储库的总容量（单位：字节）。
+### 6.2 设置总配额
 
-#### 路径参数 (Path)
-| 字段 | 类型 | 必选 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `storage_id` | integer | 是 | 存储节点 ID |
+`PUT /api/v1/storages/{storage_id}/space`，请求 `{"total_space_bytes": 1099511627776}`，总配额须为正整数且不超过 2^63−1。响应 `data` 为更新后的单个存储节点。
 
-#### 请求参数 (Body)
-| 字段 | 类型 | 必选 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `total_space_bytes` | integer | 是 | 总容量大小（单位：Bytes），必须大于 0 |
+先读取原生 `mount_details`；列表缺失时再查挂载根目录。只有缺少已用容量时才统计当前挂载目录，查询/统计共享 30 秒预算，并限制 1000 个目录及 100000 个文件。有独立子挂载、读取失败、分页不完整或超预算时保持未知。配额保存成功与容量统计成功是两件事，界面需展示 `space_error`。
 
-#### 请求示例
-```bash
-curl -X PUT "http://localhost:8000/api/v1/storages/1/space" \
-  -H "Authorization: Bearer <your_jwt_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "total_space_bytes": 16106127360
-  }'
-```
-
-#### 响应示例 (成功)
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": 1,
-    "mount_path": "/OD",
-    "driver": "PikPak",
-    "total_space": 16106127360,
-    "used_space": 10737418240,
-    "free_space": 5368709120,
-    "space_source": "manual",
-    "updated_at": "2026-09-06T19:52:00Z"
-  }
-}
-```
+以上存储接口均需要认证，不返回 `addition`、账号密码或刷新令牌。
 
 ---
 
 ## 7. 模块 5: 存储分组 (Storage Groups)
+
+分组路径按最长挂载前缀解析，支持多级挂载。响应同时提供完整 `storage_paths` 与结构化 `paths`（`id/storage_mount/folder_path`），前端请求使用 `/storage-groups`。
 
 ### 7.1 获取所有存储分组
 - **路径**：`GET /api/v1/storage-groups`
@@ -953,233 +742,63 @@ curl -X DELETE "http://localhost:8000/api/v1/codes/ABC-123" \
 
 ---
 
-## 9. 模块 7: 系统配置 (Config)
+## 9. 模块 7: 在线配置 (Config)
 
-### 9.1 获取所有可编辑配置
-- **路径**：`GET /api/v1/config`
-- **认证**：需要 Bearer Token
-- **描述**：获取当前系统生效的所有配置参数，包括 OpenList 连接参数、文件过滤规则、BT 解析服务配置以及番号探测扫描路径。
+### 9.1 读取与局部保存
 
-#### 请求参数
-无
+`GET /api/v1/config` 返回 `openlist/filter/bt_parser/probe_paths`。密码与令牌使用固定掩码 `****`，空值仍为空字符串。
 
-#### 请求示例
-```bash
-curl -X GET "http://localhost:8000/api/v1/config" \
-  -H "Authorization: Bearer <your_jwt_token>"
-```
-
-#### 响应示例 (成功)
 ```json
 {
   "code": 0,
   "message": "success",
   "data": {
-    "openlist": {
-      "base_url": "http://localhost:5244",
-      "auth_type": "password",
-      "username": "admin",
-      "token": ""
-    },
-    "filter": {
-      "allowed_extensions": [
-        ".mp4",
-        ".mkv",
-        ".avi"
-      ],
-      "min_file_size_mb": 100,
-      "blacklist_patterns": [
-        ".*广告.*",
-        ".*@.*"
-      ]
-    },
-    "bt_parser": {
-      "service_url": "http://localhost:8080"
-    },
-    "probe_paths": [
-      {
-        "group_name": "OD组",
-        "paths": [
-          {
-            "storage_mount": "/OD",
-            "folder": "/Video1"
-          },
-          {
-            "storage_mount": "/OD",
-            "folder": "/Video2"
-          }
-        ]
-      }
-    ]
+    "openlist": {"base_url": "http://openlist:5244", "auth_type": "password", "username": "admin", "password": "****", "token": ""},
+    "filter": {"allowed_extensions": [".mp4", ".mkv", ".avi", ".ts", ".wmv"], "min_file_size_mb": 100, "blacklist_patterns": [], "code_patterns": []},
+    "bt_parser": {"service_url": "http://magnet-metadata-api:8080", "token": "", "timeout_seconds": 45},
+    "probe_paths": []
   }
 }
 ```
 
----
+`PUT /api/v1/config` 仅更新显式提交的字段，嵌套字段同样保留未提交项。掩码回传表示保留原凭据，空字符串表示清空。URL 仅接受 http/https，禁止嵌入凭据、查询参数、片段和非法端口；解析超时范围为 1～300 秒。
 
-### 9.2 更新配置（部分更新）
-- **路径**：`PUT /api/v1/config`
-- **认证**：需要 Bearer Token
-- **描述**：更新系统配置项。采用局部覆盖 (Patch) 机制，客户端只需传输需要更改的顶级模块或字段，未传递的字段将保持不变。更新后即时生效并持久化。
+例如只改变解析等待时间：
 
-#### 请求参数 (Body)
-可包含 `openlist`, `filter`, `bt_parser`, `probe_paths` 中的任意一项或多项。
-
-#### 请求示例 (只修改过滤规则)
-```bash
-curl -X PUT "http://localhost:8000/api/v1/config" \
-  -H "Authorization: Bearer <your_jwt_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "filter": {
-      "allowed_extensions": [".mp4", ".mkv", ".ts"],
-      "min_file_size_mb": 200,
-      "blacklist_patterns": [".*广告.*", ".*@.*", ".*t.me.*"]
-    }
-  }'
-```
-
-#### 响应示例 (成功)
 ```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "openlist": {
-      "base_url": "http://localhost:5244",
-      "auth_type": "password",
-      "username": "admin",
-      "token": ""
-    },
-    "filter": {
-      "allowed_extensions": [
-        ".mp4",
-        ".mkv",
-        ".ts"
-      ],
-      "min_file_size_mb": 200,
-      "blacklist_patterns": [
-        ".*广告.*",
-        ".*@.*",
-        ".*t.me.*"
-      ]
-    },
-    "bt_parser": {
-      "service_url": "http://localhost:8080"
-    },
-    "probe_paths": [
-      {
-        "group_name": "OD组",
-        "paths": [
-          {
-            "storage_mount": "/OD",
-            "folder": "/Video1"
-          },
-          {
-            "storage_mount": "/OD",
-            "folder": "/Video2"
-          }
-        ]
-      }
-    ]
-  }
-}
+{"bt_parser": {"timeout_seconds": 90}}
 ```
 
----
+### 9.2 测试 OpenList
 
-### 9.3 测试 OpenList 连接
-- **路径**：`POST /api/v1/config/test-connection`
-- **认证**：需要 Bearer Token
-- **描述**：测试 Kuroko 与 OpenList 实例的连通性与版本兼容性。支持传参临时测试（如在保存前验证表单输入），也可不传参直接测试当前已持久化的配置。
+`POST /api/v1/config/test-connection` 接受可选的 `base_url/auth_type/username/password/token`。请求值与已保存配置合并，掩码保留已有凭据；不会保存测试参数。验证 OpenList 管理员权限，成功返回 `connected/version/latency_ms`；版本无法读取时为 null。
 
-#### 请求参数 (Body - 可选)
-| 字段 | 类型 | 必选 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `base_url` | string | 否 | OpenList 访问地址，如 `"http://localhost:5244"` |
-| `auth_type` | string | 否 | `"password"` 或 `"token"` |
-| `username` | string | 否 | 认证用户名 |
-| `password` | string | 否 | 密码（若使用 password 方式） |
-| `token` | string | 否 | OpenList API Token（若使用 token 方式） |
+OpenList 上游请求使用原始 Authorization 令牌。该 Kuroko 接口自身仍使用 JWT Bearer 认证。失败为 HTTP 502、业务码 50201，不透传上游错误正文。
 
-#### 请求示例
-```bash
-curl -X POST "http://localhost:8000/api/v1/config/test-connection" \
-  -H "Authorization: Bearer <your_jwt_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "base_url": "http://localhost:5244",
-    "auth_type": "password",
-    "username": "admin",
-    "password": "password123"
-  }'
+### 9.3 测试元数据服务
+
+`POST /api/v1/config/test-bt-parser` 支持临时 `service_url/token/timeout_seconds`；省略字段使用已保存配置，同样不写入数据库。
+
+```json
+{"service_url": "http://magnet-metadata-api:8080", "token": "", "timeout_seconds": 45}
 ```
 
-#### 响应示例 (成功)
+成功响应：
+
 ```json
 {
   "code": 0,
   "message": "success",
   "data": {
     "connected": true,
-    "version": "3.42.0",
-    "latency_ms": 18
+    "service_name": "magnet-metadata-api",
+    "latency_ms": 25,
+    "stats": {"active_torrents": 2, "active_locks": 1}
   }
 }
 ```
 
-#### 响应示例 (失败)
-```json
-{
-  "code": 50201,
-  "message": "无法连接到 OpenList 服务: Connection refused at http://localhost:5244",
-  "data": null
-}
-```
-
----
-
-### 9.4 测试 BT 元数据解析服务 (magnet-metadata-api)
-- **路径**：`POST /api/v1/config/test-bt-parser`
-- **认证**：需要 Bearer Token
-- **描述**：测试 Kuroko 与 `magnet-metadata-api` 服务的连通性及响应时延。支持传参临时测试，也可不传参测试系统当前持久化的配置。
-
-#### 请求参数 (Body - 可选)
-| 字段 | 类型 | 必选 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `service_url` | string | 否 | 解析服务访问地址，如 `"http://magnet-metadata-api:8080"` |
-
-#### 请求示例
-```bash
-curl -X POST "http://localhost:8000/api/v1/config/test-bt-parser" \
-  -H "Authorization: Bearer <your_jwt_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "service_url": "http://magnet-metadata-api:8080"
-  }'
-```
-
-#### 响应示例 (成功)
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "connected": true,
-    "service_name": "Torrent Metadata API Service",
-    "latency_ms": 25
-  }
-}
-```
-
-#### 响应示例 (失败)
-```json
-{
-  "code": 50202,
-  "message": "BT 解析服务不可用: Connection refused at http://magnet-metadata-api:8080",
-  "data": null
-}
-```
+上游检查端点为 `GET /api/v1/health`，返回 `status: ok` 与 `stats`。仅展示上游实际返回的计数，不伪造 DHT 连通状态。可选 token 仅用于外部认证代理；原始服务没有内建鉴权。失败为 HTTP 502、业务码 50202。所有配置接口均需要认证。
 
 ---
 
@@ -1190,15 +809,15 @@ curl -X POST "http://localhost:8000/api/v1/config/test-bt-parser" \
 | :--- | :--- |
 | `pending` | 等待调度/准备中 |
 | `downloading` | 离线下载进行中 |
-| `completed` | 下载完成并归档完毕 |
+| `completed` | 当前阶段完成；离线完成不代表转存完成或已入库 |
 | `failed` | 下载失败或 OpenList 离线错误 |
-| `cancelled` | 用户主动取消并终止 |
+| `cancelled` | OpenList 已确认取消 |
 
 ### 10.2 存储空间来源 (`SpaceSource`)
 | 枚举值 | 描述 |
 | :--- | :--- |
 | `openlist` | 由 OpenList API 自动汇报获取 |
-| `manual` | 由管理员手动指定并锁定 |
+| `manual` | 总配额由管理员指定，剩余空间仍依赖完整用量 |
 
 ### 10.3 过滤原因 (`FilterReason`)
 | 枚举值 | 描述 |
@@ -1206,3 +825,16 @@ curl -X POST "http://localhost:8000/api/v1/config/test-bt-parser" \
 | `extension` | 文件扩展名不在允许列表 (`allowed_extensions`) 中 |
 | `size` | 文件大小低于最小限制 (`min_file_size_mb`) |
 | `blacklist_pattern` | 文件名命中广告或黑名单正则表达式 (`blacklist_patterns`) |
+
+
+### 10.4 OpenList 数字状态映射
+
+| state | Kuroko 状态 | 处理 |
+| :--- | :--- | :--- |
+| 0、5、8、9 | pending | 等待、出错后待重试等非终态，继续同步 |
+| 1、3、6 | downloading | 运行、取消中、重试中，继续同步 |
+| 2 | completed | 仅当前阶段成功 |
+| 4 | cancelled | 已确认取消 |
+| 7 | failed | 重试耗尽，失败终态 |
+
+接口基线与上游 HTTP 契约见 [架构设计](architecture.md#5-上游接入与任务边界)。

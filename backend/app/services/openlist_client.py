@@ -1,5 +1,6 @@
 """OpenList v4.2.6 HTTP 适配层，协议依据官方文档和对应版本源码。"""
 
+import json
 import re
 import time
 from typing import Any, Literal
@@ -87,6 +88,12 @@ class OpenListClient:
                 return self._request(method, path, auth=auth, retry_auth=False, **kwargs)
             raise OpenListError("OpenList 鉴权失败，请检查账号或令牌", code=401)
         if not 200 <= response.status_code < 300:
+            if submitting and (response.status_code >= 500 or response.status_code == 408):
+                raise OpenListError(
+                    "OpenList 提交结果未确认，请先在 OpenList 检查任务，避免重复提交",
+                    code=response.status_code,
+                    outcome_unknown=True,
+                )
             raise OpenListError(f"OpenList 请求失败（HTTP {response.status_code}）", code=response.status_code)
         if not isinstance(payload, dict) or not isinstance(code, int) or isinstance(code, bool):
             raise OpenListError("OpenList 返回格式无效", outcome_unknown=submitting)
@@ -99,7 +106,9 @@ class OpenListClient:
         if not self.username or not self.password:
             raise OpenListError("请配置 OpenList 用户名和密码", code=401)
         data = self._request(
-            "POST", "/api/auth/login", auth=False,
+            "POST",
+            "/api/auth/login",
+            auth=False,
             json={"username": self.username, "password": self.password},
         )
         token = data.get("token") if isinstance(data, dict) else None
@@ -123,15 +132,33 @@ class OpenListClient:
             pass
         return {"connected": True, "version": version, "latency_ms": round((time.perf_counter() - started) * 1000, 1)}
 
-    def _pages(self, method: str, endpoint: str, body: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    def _pages(
+        self,
+        method: str,
+        endpoint: str,
+        body: dict[str, Any] | None = None,
+        *,
+        deadline: float | None = None,
+    ) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         seen: set[str | int] = set()
+        expected_total = None
         for page in range(1, self.MAX_PAGES + 1):
             pagination = {"page": page, "per_page": self.PAGE_SIZE}
             kwargs = {"json": {**body, **pagination}} if body is not None else {"params": pagination}
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise OpenListError("OpenList 列表读取超出统计时间预算")
+                kwargs["timeout"] = min(20, remaining)
             data = self._request(method, endpoint, **kwargs)
+            if deadline is not None and time.monotonic() > deadline:
+                raise OpenListError("OpenList 列表读取超出统计时间预算")
             if not isinstance(data, dict) or nonnegative_int(data.get("total")) is None:
                 raise OpenListError("OpenList 分页响应格式无效")
+            if expected_total is not None and data["total"] != expected_total:
+                raise OpenListError("OpenList 分页期间列表发生变化，请刷新后重试")
+            expected_total = data["total"]
             content = data.get("content")
             if content is None and data["total"] == 0:
                 content = []
@@ -145,15 +172,22 @@ class OpenListClient:
                     raise OpenListError("OpenList 分页返回了无效或重复记录，请刷新后重试")
                 seen.add(key)
                 items.append(item)
-            if len(items) >= data["total"]:
+            if len(items) > expected_total:
+                raise OpenListError("OpenList 分页数量与总数不一致")
+            if len(items) == expected_total:
                 return items
             if not content:
                 raise OpenListError("OpenList 分页结果不完整")
         raise OpenListError("OpenList 列表超过单次读取上限")
 
-    def list_files(self, path: str) -> list[dict[str, Any]]:
+    def list_files(self, path: str, *, deadline: float | None = None) -> list[dict[str, Any]]:
         path = normalize_path(path)
-        entries = self._pages("POST", "/api/fs/list", {"path": path, "password": "", "refresh": False})
+        entries = self._pages(
+            "POST",
+            "/api/fs/list",
+            {"path": path, "password": "", "refresh": False},
+            deadline=deadline,
+        )
         for entry in entries:
             try:
                 child_path(path, entry.get("name"))
@@ -163,8 +197,9 @@ class OpenListClient:
                 raise OpenListError("OpenList 返回了无效的文件属性")
         return [{key: item[key] for key in ("name", "size", "is_dir")} for item in entries]
 
-    def get_file(self, path: str) -> dict[str, Any]:
-        data = self._request("POST", "/api/fs/get", json={"path": normalize_path(path), "password": ""})
+    def get_file(self, path: str, *, timeout: float | None = None) -> dict[str, Any]:
+        options = {"timeout": timeout} if timeout is not None else {}
+        data = self._request("POST", "/api/fs/get", json={"path": normalize_path(path), "password": ""}, **options)
         if not isinstance(data, dict) or not isinstance(data.get("is_dir"), bool):
             raise OpenListError("OpenList 文件信息格式无效")
         return {key: data.get(key) for key in ("name", "size", "is_dir", "mount_details")}
@@ -179,17 +214,36 @@ class OpenListClient:
                 mount = normalize_path(entry.get("mount_path"))
             except ValueError as exc:
                 raise OpenListError("OpenList 挂载路径无效") from exc
-            result.append({
-                "id": entry["id"], "mount_path": mount,
-                "driver": entry.get("driver") if isinstance(entry.get("driver"), str) else "unknown",
-                "status": "disabled" if entry.get("disabled") else "work" if entry.get("status") == "work" else "error",
-                "mount_details": entry.get("mount_details"),
-            })
+            # addition 含刷新令牌等凭据，只提取诊断容量开关所需的布尔值，绝不向外透传。
+            addition = entry.get("addition")
+            if isinstance(addition, str) and len(addition) <= 1024 * 1024:
+                try:
+                    addition = json.loads(addition)
+                except ValueError:
+                    addition = None
+            usage_disabled = isinstance(addition, dict) and addition.get("disable_disk_usage") is True
+            result.append(
+                {
+                    "id": entry["id"],
+                    "mount_path": mount,
+                    "driver": entry.get("driver") if isinstance(entry.get("driver"), str) else "unknown",
+                    "status": "disabled"
+                    if entry.get("disabled")
+                    else "work"
+                    if entry.get("status") == "work"
+                    else "error",
+                    "mount_details": entry.get("mount_details"),
+                    "disk_usage_disabled": usage_disabled,
+                }
+            )
         return result
 
     def get_offline_tools(self, path: str) -> list[str]:
         data = self._request(
-            "GET", "/api/public/offline_download_tools", auth=False, params={"path": normalize_path(path)},
+            "GET",
+            "/api/public/offline_download_tools",
+            auth=False,
+            params={"path": normalize_path(path)},
         )
         if data is None:
             return []
@@ -198,10 +252,16 @@ class OpenListClient:
         return data
 
     def add_offline_download(self, magnet: str, save_path: str) -> str:
-        data = self._request("POST", "/api/fs/add_offline_download", json={
-            "urls": [clean_magnet(magnet)], "path": normalize_path(save_path),
-            "tool": "PikPak", "delete_policy": "delete_always",
-        })
+        data = self._request(
+            "POST",
+            "/api/fs/add_offline_download",
+            json={
+                "urls": [clean_magnet(magnet)],
+                "path": normalize_path(save_path),
+                "tool": "PikPak",
+                "delete_policy": "delete_always",
+            },
+        )
         tasks = data.get("tasks") if isinstance(data, dict) else None
         if not isinstance(tasks, list) or len(tasks) != 1 or not isinstance(tasks[0], dict):
             raise OpenListError("OpenList 未返回离线任务，请检查上游任务后再操作", outcome_unknown=True)
@@ -219,9 +279,20 @@ class OpenListClient:
     def _safe_task(self, item: Any) -> dict[str, Any]:
         if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not 1 <= len(item["id"]) <= 255:
             raise OpenListError("OpenList 任务响应格式无效")
-        result = {key: item.get(key) for key in (
-            "id", "name", "state", "status", "progress", "total_bytes", "error", "start_time", "end_time",
-        )}
+        result = {
+            key: item.get(key)
+            for key in (
+                "id",
+                "name",
+                "state",
+                "status",
+                "progress",
+                "total_bytes",
+                "error",
+                "start_time",
+                "end_time",
+            )
+        }
         for key in ("name", "status", "error"):
             value = result[key]
             if value is not None:
@@ -233,7 +304,9 @@ class OpenListClient:
                 result[key] = re.sub(r"https?://\S+", "[上游地址]", value)[:2048]
         return result
 
-    def get_offline_tasks(self, task_ids: list[str] | None = None, *, kind: TaskKind = "offline_download") -> list[dict[str, Any]]:
+    def get_offline_tasks(
+        self, task_ids: list[str] | None = None, *, kind: TaskKind = "offline_download"
+    ) -> list[dict[str, Any]]:
         by_id = {}
         for action in ("undone", "done"):
             data = self._request("GET", self._task_path(kind, action))

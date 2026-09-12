@@ -50,7 +50,9 @@ class OpenListConfig(BaseModel):
 
 
 class FilterConfig(BaseModel):
-    allowed_extensions: list[str] = Field(default_factory=lambda: [".mp4", ".mkv", ".avi", ".ts", ".wmv"], min_length=1, max_length=100)
+    allowed_extensions: list[str] = Field(
+        default_factory=lambda: [".mp4", ".mkv", ".avi", ".ts", ".wmv"], min_length=1, max_length=100
+    )
     min_file_size_mb: int = Field(100, ge=0, le=102400)
     blacklist_patterns: list[str] = Field(default_factory=list, max_length=100)
     code_patterns: list[str] = Field(default_factory=list, max_length=20)
@@ -58,8 +60,13 @@ class FilterConfig(BaseModel):
     @field_validator("allowed_extensions")
     @classmethod
     def normalize_extensions(cls, values: list[str]) -> list[str]:
-        normalized = [value.strip().lower() if value.strip().startswith(".") else f".{value.strip().lower()}" for value in values]
-        if any(not value[1:] or len(value) > 16 or not value[1:].replace("-", "").replace("_", "").isalnum() for value in normalized):
+        normalized = [
+            value.strip().lower() if value.strip().startswith(".") else f".{value.strip().lower()}" for value in values
+        ]
+        if any(
+            not value[1:] or len(value) > 16 or not value[1:].replace("-", "").replace("_", "").isalnum()
+            for value in normalized
+        ):
             raise ValueError("扩展名格式无效")
         return list(dict.fromkeys(normalized))
 

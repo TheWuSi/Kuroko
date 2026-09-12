@@ -24,7 +24,9 @@ def list_storages(db: Session = Depends(get_db)):
 
 @router.put("/storages/{storage_id}/space")
 def update_space(
-    payload: SpaceOverrideRequest, storage_id: int = Path(ge=1), db: Session = Depends(get_db),
+    payload: SpaceOverrideRequest,
+    storage_id: int = Path(ge=1),
+    db: Session = Depends(get_db),
 ):
     try:
         with get_client(db) as client:
@@ -32,13 +34,21 @@ def update_space(
             storage = next((item for item in remote if item["id"] == storage_id), None)
             if storage is None:
                 raise HTTPException(status_code=404, detail="存储节点不存在")
-            row = db.query(StorageSpaceOverride).filter(StorageSpaceOverride.storage_mount == storage["mount_path"]).first()
+            row = (
+                db.query(StorageSpaceOverride)
+                .filter(StorageSpaceOverride.storage_mount == storage["mount_path"])
+                .first()
+            )
             if row is None:
-                db.add(StorageSpaceOverride(storage_mount=storage["mount_path"], total_space_bytes=payload.total_space_bytes))
+                db.add(
+                    StorageSpaceOverride(
+                        storage_mount=storage["mount_path"], total_space_bytes=payload.total_space_bytes
+                    )
+                )
             else:
                 row.total_space_bytes = payload.total_space_bytes
             db.commit()
-            refreshed = storage_info(db, client=client, remote=remote)
+            refreshed = storage_info(db, client=client, remote=remote, storage_id=storage_id)
             return success(next(item for item in refreshed if item["id"] == storage_id))
     except OpenListError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -46,12 +56,19 @@ def update_space(
 
 def group_data(group: StorageGroup) -> dict:
     return {
-        "id": group.id, "name": group.name,
+        "id": group.id,
+        "name": group.name,
         "storage_paths": [join_path(item.storage_mount, item.folder_path) for item in group.paths],
-        "paths": [{
-            "id": item.id, "storage_mount": item.storage_mount, "folder_path": item.folder_path,
-        } for item in group.paths],
-        "created_at": group.created_at.isoformat(), "updated_at": group.updated_at.isoformat(),
+        "paths": [
+            {
+                "id": item.id,
+                "storage_mount": item.storage_mount,
+                "folder_path": item.folder_path,
+            }
+            for item in group.paths
+        ],
+        "created_at": group.created_at.isoformat(),
+        "updated_at": group.updated_at.isoformat(),
     }
 
 

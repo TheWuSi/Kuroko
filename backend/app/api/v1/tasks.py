@@ -14,19 +14,30 @@ router = APIRouter(prefix="/tasks", tags=["Tasks"], dependencies=[Depends(get_cu
 
 def task_data(task: DownloadTask) -> dict:
     return {
-        "task_id": task.task_id, "openlist_task_id": task.openlist_task_id, "code": task.code,
-        "magnet": task.magnet, "status": task.status, "progress": task.progress, "speed": task.speed,
-        "target_path": task.target_path, "total_size": task.total_size, "downloaded_size": task.downloaded_size,
-        "downloaded_size_is_estimate": True, "phase": "offline_download",
-        "error_message": task.error_message, "created_at": task.created_at.isoformat(),
+        "task_id": task.task_id,
+        "openlist_task_id": task.openlist_task_id,
+        "code": task.code,
+        "magnet": task.magnet,
+        "status": task.status,
+        "progress": task.progress,
+        "speed": task.speed,
+        "target_path": task.target_path,
+        "total_size": task.total_size,
+        "downloaded_size": task.downloaded_size,
+        "downloaded_size_is_estimate": True,
+        "phase": "offline_download",
+        "error_message": task.error_message,
+        "created_at": task.created_at.isoformat(),
         "updated_at": task.updated_at.isoformat(),
     }
 
 
 @router.get("")
 def list_tasks(
-    status: TaskStatus | None = Query(None), page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100), db: Session = Depends(get_db),
+    status: TaskStatus | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
 ):
     query = db.query(DownloadTask)
     if status:
@@ -40,11 +51,13 @@ def list_tasks(
 def sync(db: Session = Depends(get_db)):
     try:
         updated = sync_tasks(db)
-        return success({
-            "synced_count": len(updated),
-            "completed_count": sum(task.status == TaskStatus.completed.value for task in updated),
-            "updated_tasks": [task_data(task) for task in updated],
-        })
+        return success(
+            {
+                "synced_count": len(updated),
+                "completed_count": sum(task.status == TaskStatus.completed.value for task in updated),
+                "updated_tasks": [task_data(task) for task in updated],
+            }
+        )
     except OpenListError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -54,11 +67,18 @@ def list_transfers(db: Session = Depends(get_db)):
     try:
         with get_client(db) as client:
             tasks = client.get_offline_tasks(kind="offline_download_transfer")
-        items = [{
-            "task_id": item["id"], "name": item["name"], "phase": "offline_download_transfer",
-            "start_time": item["start_time"], "end_time": item["end_time"],
-            "downloaded_size_is_estimate": True, **normalize_task(item),
-        } for item in tasks]
+        items = [
+            {
+                "task_id": item["id"],
+                "name": item["name"],
+                "phase": "offline_download_transfer",
+                "start_time": item["start_time"],
+                "end_time": item["end_time"],
+                "downloaded_size_is_estimate": True,
+                **normalize_task(item),
+            }
+            for item in tasks
+        ]
         return success({"items": items})
     except OpenListError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -89,7 +109,8 @@ def get_task(task_id: str = Path(min_length=1, max_length=255), db: Session = De
 @router.delete("/{task_id}")
 def cancel_task(
     task_id: str = Path(min_length=1, max_length=255),
-    delete_files: bool = False, db: Session = Depends(get_db),
+    delete_files: bool = False,
+    db: Session = Depends(get_db),
 ):
     if delete_files:
         raise ApiError(400, 40001, "此接口仅取消任务，文件删除请在 OpenList 中操作")

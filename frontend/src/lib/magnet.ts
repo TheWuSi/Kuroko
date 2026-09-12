@@ -9,9 +9,29 @@ export interface CleanMagnetResult {
   infoHash: string | null
 }
 
+export function normalizeInfoHash(value: string): string | null {
+  if (/^[a-f0-9]{40}$/i.test(value)) return value.toLowerCase()
+  if (!/^[a-z2-7]{32}$/i.test(value)) return null
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+  let buffer = 0
+  let bits = 0
+  let hex = ''
+  for (const char of value.toUpperCase()) {
+    buffer = (buffer << 5) | alphabet.indexOf(char)
+    bits += 5
+    if (bits >= 8) {
+      bits -= 8
+      hex += ((buffer >> bits) & 255).toString(16).padStart(2, '0')
+      buffer &= (1 << bits) - 1
+    }
+  }
+  return hex
+}
+
 export function cleanMagnetUri(uri: string): CleanMagnetResult | null {
+  if (uri.length > 8192 || Array.from(uri).some((char) => char.charCodeAt(0) < 32)) return null
   const trimmed = uri.trim()
-  if (!trimmed.toLowerCase().startsWith('magnet:?')) {
+  if (!trimmed.toLowerCase().startsWith('magnet:?') || trimmed.includes('#')) {
     return null
   }
 
@@ -28,14 +48,15 @@ export function cleanMagnetUri(uri: string): CleanMagnetResult | null {
     for (const [key, value] of params.entries()) {
       const lowerKey = key.toLowerCase()
       if (lowerKey === 'xt') {
-        const match = value.match(/urn:btih:([a-fA-F0-9]{32,40})/i)
+        const match = value.match(/^urn:btih:(.+)$/i)
         if (match && !infoHash) {
-          infoHash = match[1].toLowerCase()
-          newParams.set('xt', `urn:btih:${match[1]}`)
+          infoHash = normalizeInfoHash(match[1])
+          if (!infoHash) return null
+          newParams.set('xt', `urn:btih:${infoHash}`)
         }
       } else if (lowerKey === 'dn') {
         if (!dn && value) {
-          dn = value.trim()
+          dn = Array.from(value).slice(0, 1024).join('')
           newParams.set('dn', dn)
         }
       } else if (lowerKey === 'tr') {

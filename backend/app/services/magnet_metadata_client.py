@@ -14,7 +14,10 @@ MAX_BYTES = 2**63 - 1
 
 def _relative_path(value: str) -> str:
     if (
-        not value or len(value) > 4096 or value.startswith("/") or "\\" in value
+        not value
+        or len(value) > 4096
+        or value.startswith("/")
+        or "\\" in value
         or any(part in {"", ".", ".."} for part in value.split("/"))
         or any(ord(char) < 32 or ord(char) == 127 for char in value)
     ):
@@ -52,15 +55,21 @@ class MagnetMetadataError(RuntimeError):
 
 class MagnetMetadataApiClient:
     def __init__(
-        self, service_url: str, token: str = "", timeout: float = 45.0,
-        *, transport: httpx.BaseTransport | None = None,
+        self,
+        service_url: str,
+        token: str = "",
+        timeout: float = 45.0,
+        *,
+        transport: httpx.BaseTransport | None = None,
     ):
         self.service_url = validate_optional_url(service_url, "BT 解析服务地址")
         self.token = token or ""
         self.timeout = max(1.0, min(float(timeout), 300.0))
         if any(ord(char) < 32 or ord(char) == 127 for char in self.token):
             raise MagnetMetadataError("解析服务令牌包含无效字符")
-        self.http = httpx.Client(timeout=httpx.Timeout(self.timeout, connect=min(10, self.timeout)), transport=transport)
+        self.http = httpx.Client(
+            timeout=httpx.Timeout(self.timeout, connect=min(10, self.timeout)), transport=transport
+        )
 
     def __enter__(self):
         return self
@@ -77,7 +86,9 @@ class MagnetMetadataApiClient:
         headers = {}
         # 上游没有内建鉴权；仅为部署在 Bearer 认证代理后的实例保留可选令牌。
         if self.token:
-            headers["Authorization"] = self.token if self.token.lower().startswith("bearer ") else f"Bearer {self.token}"
+            headers["Authorization"] = (
+                self.token if self.token.lower().startswith("bearer ") else f"Bearer {self.token}"
+            )
         try:
             response = self.http.request(method, f"{self.service_url}{path}", headers=headers, **kwargs)
         except httpx.TimeoutException as exc:
@@ -113,7 +124,9 @@ class MagnetMetadataApiClient:
         except (ValidationError, ValueError) as exc:
             raise MagnetMetadataError("磁力元数据服务返回格式无效", reason="bt_metadata_invalid_response") from exc
         return {
-            "info_hash": metadata.info_hash.lower(), "name": metadata.name, "size": metadata.size,
+            "info_hash": metadata.info_hash.lower(),
+            "name": metadata.name,
+            "size": metadata.size,
             "files": [{"name": file.path, **file.model_dump()} for file in files],
             "metadata_fallback": False,
         }
@@ -127,8 +140,12 @@ class MagnetMetadataApiClient:
             return self.fetch_metadata(magnet_uri)
         except MagnetMetadataError as exc:
             return {
-                "info_hash": magnet_info_hash(magnet_uri), "name": magnet_display_name(magnet_uri),
-                "size": 0, "files": [], "metadata_fallback": True, "fallback": True,
+                "info_hash": magnet_info_hash(magnet_uri),
+                "name": magnet_display_name(magnet_uri),
+                "size": 0,
+                "files": [],
+                "metadata_fallback": True,
+                "fallback": True,
                 "fallback_reason": exc.reason,
             }
 
@@ -145,7 +162,9 @@ class MagnetMetadataApiClient:
                     raise MagnetMetadataError("magnet-metadata-api 健康数据无效", reason="bt_metadata_invalid_response")
                 stats[key] = value
         return {
-            "connected": True, "service_name": "magnet-metadata-api", "stats": stats,
+            "connected": True,
+            "service_name": "magnet-metadata-api",
+            "stats": stats,
             "latency_ms": round((time.perf_counter() - started) * 1000, 1),
         }
 

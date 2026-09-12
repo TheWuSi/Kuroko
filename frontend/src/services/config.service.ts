@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { ApiResponse, SystemConfigData, ConnectionTestResult } from '@/types/api'
+import type { ApiResponse, SystemConfigData, ConnectionTestResult, BtParserConfig } from '@/types/api'
 
 export const configService = {
   // 获取所有可编辑配置
@@ -30,7 +30,7 @@ export const configService = {
   },
 
   // 测试 magnet-metadata-api 连通性
-  async testBtParser(params?: { service_url?: string }): Promise<ConnectionTestResult> {
+  async testBtParser(params?: Partial<BtParserConfig>): Promise<ConnectionTestResult> {
     const res = await apiClient.post<ApiResponse<ConnectionTestResult>>(
       '/config/test-bt-parser',
       params || {}

@@ -12,7 +12,9 @@ def test_password_hash_round_trip() -> None:
 
 
 def test_magnet_cleaner_keeps_only_identity_fields() -> None:
-    cleaned = clean_magnet("magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=ABC-123&tr=https://tracker.invalid")
+    cleaned = clean_magnet(
+        "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=ABC-123&tr=https://tracker.invalid"
+    )
     assert cleaned.startswith("magnet:?")
     assert "xt=urn%3Abtih%3A0123456789abcdef0123456789abcdef01234567" in cleaned
     assert "tr=" not in cleaned

@@ -6,6 +6,9 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { EmptyState } from '@/components/common/EmptyState'
 import {
   DownloadCloud,
@@ -30,12 +33,13 @@ export function Dashboard() {
   const [activeTasks, setActiveTasks] = useState<DownloadTask[]>([])
   const [totalCodes, setTotalCodes] = useState<number>(0)
   const [storages, setStorages] = useState<StorageNodeInfo[]>([])
+  const [activeTab, setActiveTab] = useState('all')
 
   const loadData = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true)
     try {
       const [tasksRes, codesRes, storagesRes] = await Promise.all([
-        taskService.getTasks({ page: 1, page_size: 10 }),
+        taskService.getTasks({ page: 1, page_size: 20 }),
         codeService.getCodes({ page: 1, page_size: 1 }),
         storageService.getStorages().catch(() => []),
       ])
@@ -53,9 +57,22 @@ export function Dashboard() {
   }, [])
 
   // 计算存储统计
-  const totalStorageBytes = storages.reduce((sum, s) => sum + (s.total_space || 0), 0)
-  const freeStorageBytes = storages.reduce((sum, s) => sum + (s.free_space || 0), 0)
-  const downloadingCount = activeTasks.filter((t) => t.status === 'downloading' || t.status === 'pending').length
+  const totalStorageBytes = storages.length && storages.every((node) => node.total_space !== null)
+    ? storages.reduce((sum, node) => sum + (node.total_space ?? 0), 0) : null
+  const freeStorageBytes = storages.length && storages.every((node) => node.free_space !== null)
+    ? storages.reduce((sum, node) => sum + (node.free_space ?? 0), 0) : null
+  const downloadingTasks = activeTasks.filter((t) => t.status === 'downloading' || t.status === 'pending')
+  const completedTasks = activeTasks.filter((t) => t.status === 'completed')
+  const failedTasks = activeTasks.filter((t) => t.status === 'failed')
+
+  const filteredTasks =
+    activeTab === 'downloading'
+      ? downloadingTasks
+      : activeTab === 'completed'
+      ? completedTasks
+      : activeTab === 'failed'
+      ? failedTasks
+      : activeTasks
 
   return (
     <div className="space-y-6">
@@ -68,12 +85,12 @@ export function Dashboard() {
           size="sm"
           onClick={() => loadData(true)}
           disabled={refreshing}
-          className="gap-2"
+          className="gap-2 min-h-[44px] sm:min-h-[36px]"
         >
           <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
           刷新数据
         </Button>
-        <Button asChild size="sm" className="gap-2">
+        <Button asChild size="sm" className="gap-2 min-h-[44px] sm:min-h-[36px]">
           <Link to="/magnets">
             <Plus className="h-4 w-4" />
             解析新磁力
@@ -81,63 +98,109 @@ export function Dashboard() {
         </Button>
       </PageHeader>
 
-      {/* 4 块数据指标卡片 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          title="活动离线任务"
-          value={loading ? '-' : `${downloadingCount} 项`}
-          description="等待调度与下载中"
-          icon={<DownloadCloud className="h-5 w-5" />}
-        />
-        <StatCard
-          title="已收录番号总数"
-          value={loading ? '-' : `${totalCodes} 部`}
-          description="定向扫描与下载自动入库"
-          icon={<Film className="h-5 w-5" />}
-        />
-        <StatCard
-          title="纳管存储剩余容量"
-          value={loading ? '-' : formatBytes(freeStorageBytes)}
-          description={`总容量: ${formatBytes(totalStorageBytes)}`}
-          icon={<HardDrive className="h-5 w-5" />}
-        />
-        <StatCard
-          title="系统健康状态"
-          value="良好"
-          description="PikPak 引擎就绪"
-          icon={<Activity className="h-5 w-5" />}
-        />
-      </div>
+      {/* 4 块数据指标卡片 / 骨架屏 */}
+      {loading ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Card key={i} className="p-5 space-y-3">
+              <div className="flex justify-between items-center">
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-8 w-8 rounded-lg" />
+              </div>
+              <Skeleton className="h-8 w-32" />
+              <Skeleton className="h-3 w-40" />
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard
+            title="活动离线任务"
+            value={`${downloadingTasks.length} 项`}
+            description="等待调度与下载中"
+            icon={<DownloadCloud className="h-5 w-5" />}
+          />
+          <StatCard
+            title="已收录番号总数"
+            value={`${totalCodes} 部`}
+            description="通过定向扫描收录实际文件"
+            icon={<Film className="h-5 w-5" />}
+          />
+          <StatCard
+            title="纳管存储剩余容量"
+            value={formatBytes(freeStorageBytes)}
+            description={`总容量: ${formatBytes(totalStorageBytes)}`}
+            icon={<HardDrive className="h-5 w-5" />}
+          />
+          <StatCard
+            title="系统服务健康"
+            value="良好"
+            description="OpenList 调度引擎就绪"
+            icon={<Activity className="h-5 w-5" />}
+          />
+        </div>
+      )}
 
-      {/* 主面板：左侧活动下载流，右侧存储池碎片分析 */}
+      {/* 主面板：左侧活动下载流（带 Tabs），右侧存储池碎片分析 */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* 近期离线任务 */}
         <div className="lg:col-span-2 space-y-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
+          <Card className="shadow-xs">
+            <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 gap-3">
+              <div className="flex items-center gap-2">
                 <Clock className="h-4 w-4 text-blue-600" />
-                近期离线下载任务
-              </CardTitle>
-              <Button asChild variant="ghost" size="sm" className="text-xs text-blue-600 gap-1">
-                <Link to="/tasks">
-                  查看全部
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Link>
-              </Button>
+                <CardTitle className="text-base">近期任务活动流</CardTitle>
+              </div>
+
+              {/* Tabs 快速切换流类型 */}
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-auto">
+                <TabsList className="grid grid-cols-4 h-9 p-1">
+                  <TabsTrigger value="all" className="text-xs px-2.5">
+                    全部 ({activeTasks.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="downloading" className="text-xs px-2.5">
+                    进行中 ({downloadingTasks.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="completed" className="text-xs px-2.5">
+                    已完成 ({completedTasks.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="failed" className="text-xs px-2.5">
+                    失败 ({failedTasks.length})
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
             </CardHeader>
+
             <CardContent>
-              {activeTasks.length === 0 ? (
+              {loading ? (
+                <div className="space-y-3">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="p-3.5 rounded-xl border border-slate-100 bg-slate-50/50 space-y-2">
+                      <div className="flex justify-between items-center">
+                        <Skeleton className="h-4 w-32" />
+                        <Skeleton className="h-4 w-16" />
+                      </div>
+                      <Skeleton className="h-2 w-full rounded-full" />
+                    </div>
+                  ))}
+                </div>
+              ) : filteredTasks.length === 0 ? (
                 <EmptyState
-                  title="暂无正在运行的任务"
+                  title={
+                    activeTab === 'downloading'
+                      ? '暂无进行中的下载任务'
+                      : activeTab === 'failed'
+                      ? '暂无失败任务'
+                      : '暂无任务记录'
+                  }
                   description="在磁力工作台中填入磁力链接即可一键发起离线下载"
                 />
               ) : (
                 <div className="space-y-3">
-                  {activeTasks.slice(0, 5).map((task) => (
+                  {filteredTasks.slice(0, 6).map((task) => (
                     <div
                       key={task.task_id}
-                      className="p-3.5 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors"
+                      className="p-3.5 rounded-xl border border-slate-200/60 bg-slate-50/40 hover:bg-slate-50 transition-colors"
                     >
                       <div className="flex items-center justify-between gap-3 mb-2">
                         <div className="flex items-center gap-2 min-w-0">
@@ -147,19 +210,32 @@ export function Dashboard() {
                           <StatusBadge status={task.status} />
                         </div>
                         <div className="text-xs font-mono text-slate-500 shrink-0">
-                          {task.status === 'downloading' ? formatSpeed(task.speed) : formatBytes(task.total_size)}
+                          {task.status === 'downloading'
+                            ? formatSpeed(task.speed)
+                            : formatBytes(task.total_size)}
                         </div>
                       </div>
 
                       <div className="space-y-1">
                         <div className="flex justify-between text-[11px] text-slate-400 font-mono">
-                          <span className="truncate max-w-[200px] sm:max-w-md">📁 {task.target_path}</span>
+                          <span className="truncate max-w-[200px] sm:max-w-md">
+                            📁 {task.target_path}
+                          </span>
                           <span>{task.progress.toFixed(1)}%</span>
                         </div>
                         <Progress value={task.progress} />
                       </div>
                     </div>
                   ))}
+
+                  <div className="pt-2 text-center">
+                    <Button asChild variant="ghost" size="sm" className="text-xs text-blue-600 gap-1 min-h-[44px] sm:min-h-[36px]">
+                      <Link to="/tasks">
+                        前往完整任务管理列表
+                        <ArrowRight className="h-3.5 w-3.5" />
+                      </Link>
+                    </Button>
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -168,21 +244,37 @@ export function Dashboard() {
 
         {/* 存储拓扑分布卡片 */}
         <div className="space-y-4">
-          <Card>
+          <Card className="shadow-xs">
             <CardHeader className="flex flex-row items-center justify-between pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
+              <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-blue-600" />
-                存储池碎片与容量
-              </CardTitle>
-              <Button asChild variant="ghost" size="sm" className="text-xs text-blue-600 gap-1">
-                <Link to="/storages">
-                  管理拓扑
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Link>
-              </Button>
+                <CardTitle className="text-base">存储池碎片与水位</CardTitle>
+              </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button asChild variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-600">
+                    <Link to="/storages">
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>管理存储驱动拓扑</TooltipContent>
+              </Tooltip>
             </CardHeader>
             <CardContent>
-              {storages.length === 0 ? (
+              {loading ? (
+                <div className="space-y-4">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="space-y-2">
+                      <div className="flex justify-between">
+                        <Skeleton className="h-3 w-28" />
+                        <Skeleton className="h-3 w-16" />
+                      </div>
+                      <Skeleton className="h-2 w-full rounded-full" />
+                    </div>
+                  ))}
+                </div>
+              ) : storages.length === 0 ? (
                 <EmptyState
                   title="未检测到存储挂载点"
                   description="请在系统设置中配置并连接 OpenList"
@@ -190,22 +282,30 @@ export function Dashboard() {
               ) : (
                 <div className="space-y-4">
                   {storages.map((node) => {
-                    const total = node.total_space || 0
-                    const free = node.free_space || 0
-                    const used = node.used_space ?? (total - free)
-                    const percent = total > 0 ? Math.round((used / total) * 100) : 0
+                    const total = node.total_space
+                    const free = node.free_space
+                    const used = node.used_space
+                    const percent = total !== null && total > 0 && used !== null
+                      ? Math.min(100, Math.round((used / total) * 100)) : null
 
                     return (
                       <div key={node.id} className="space-y-1.5 font-mono text-xs">
                         <div className="flex items-center justify-between">
-                          <span className="font-semibold text-slate-800 truncate max-w-[160px]">
-                            {node.mount_path}
-                          </span>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="font-semibold text-slate-800 truncate max-w-[160px] cursor-help">
+                                {node.mount_path}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              挂载点: {node.mount_path} · 驱动: {node.driver}
+                            </TooltipContent>
+                          </Tooltip>
                           <span className="text-slate-400">
                             余 {formatBytes(free)}
                           </span>
                         </div>
-                        <Progress
+                        {percent !== null && <Progress
                           value={percent}
                           indicatorClassName={
                             percent > 90
@@ -214,10 +314,10 @@ export function Dashboard() {
                               ? 'bg-amber-500'
                               : 'bg-blue-600'
                           }
-                        />
+                        />}
                         <div className="flex justify-between text-[11px] text-slate-400">
                           <span>驱动: {node.driver}</span>
-                          <span>已用 {percent}%</span>
+                          <span>{percent === null ? '用量未知' : `已用 ${percent}%`}</span>
                         </div>
                       </div>
                     )
@@ -237,7 +337,7 @@ function StatusBadge({ status }: { status: string }) {
     case 'downloading':
       return <Badge variant="info">下载中</Badge>
     case 'completed':
-      return <Badge variant="success">已完成</Badge>
+      return <Badge variant="success">离线完成</Badge>
     case 'failed':
       return <Badge variant="destructive">失败</Badge>
     case 'cancelled':

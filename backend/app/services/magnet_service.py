@@ -4,13 +4,15 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models.code import CodeRecord
-from app.services.magnet_metadata_client import MagnetMetadataApiClient
 from app.services.config_service import get_config
+from app.services.magnet_metadata_client import MagnetMetadataApiClient
 from app.utils.code_extractor import extract_code
 from app.utils.magnet_parser import clean_magnet
 
 
-def filter_files(files: list[dict[str, Any]], config: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def filter_files(
+    files: list[dict[str, Any]], config: dict[str, Any]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     rules = config["filter"]
     allowed = {str(item).lower() for item in rules.get("allowed_extensions", [])}
     try:
@@ -60,10 +62,17 @@ def parse_magnets(db: Session, links: list[str]) -> list[dict[str, Any]]:
             dn_code = extract_code(cleaned, config["filter"].get("code_patterns", []))
             parsed = parser.parse_with_fallback(cleaned)
             valid, rejected = filter_files(parsed.get("files", []), config)
-            verified_code = next(
-                (extract_code(item["name"], config["filter"].get("code_patterns", [])) for item in valid if extract_code(item["name"], config["filter"].get("code_patterns", []))),
-                None,
-            ) or dn_code
+            verified_code = (
+                next(
+                    (
+                        extract_code(item["name"], config["filter"].get("code_patterns", []))
+                        for item in valid
+                        if extract_code(item["name"], config["filter"].get("code_patterns", []))
+                    ),
+                    None,
+                )
+                or dn_code
+            )
             existing = db.query(CodeRecord).filter(CodeRecord.code == verified_code).first() if verified_code else None
             results.append(
                 {

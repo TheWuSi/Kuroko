@@ -6,12 +6,17 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.models.config import SystemConfig
 from app.core.config import get_settings
+from app.models.config import SystemConfig
 
 DEFAULTS: dict[str, Any] = {
     "openlist": {"base_url": "", "auth_type": "token", "username": "", "password": "", "token": ""},
-    "filter": {"allowed_extensions": [".mp4", ".mkv", ".avi", ".ts", ".wmv"], "min_file_size_mb": 100, "blacklist_patterns": [], "code_patterns": []},
+    "filter": {
+        "allowed_extensions": [".mp4", ".mkv", ".avi", ".ts", ".wmv"],
+        "min_file_size_mb": 100,
+        "blacklist_patterns": [],
+        "code_patterns": [],
+    },
     "bt_parser": {"service_url": "", "token": "", "timeout_seconds": 45},
     "probe_paths": [],
 }

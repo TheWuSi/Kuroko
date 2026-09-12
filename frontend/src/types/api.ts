@@ -58,6 +58,8 @@ export interface MagnetParseItem {
   dn_code: string | null
   verified_code: string | null
   total_files_count: number
+  total_size: number
+  info_hash: string
   files: ParsedFileItem[]
   filtered_files: ParsedFileItem[]
   exists_in_library: boolean
@@ -68,6 +70,7 @@ export interface MagnetParseItem {
 
 export interface MagnetParseResponse {
   results: MagnetParseItem[]
+  errors?: Array<{ index: number; magnet: string; message: string }>
 }
 
 export interface DownloadTaskSubmitItem {
@@ -75,19 +78,35 @@ export interface DownloadTaskSubmitItem {
   code: string
   force?: boolean
   target_group?: string | number
+  target_path?: string
 }
 
 export interface BatchDownloadResponse {
   submitted: Array<{
+    index: number
+    magnet: string
     code: string
     task_id: string
     target_path: string
     openlist_task_id: string
+    total_size: number
+    metadata_fallback: boolean
   }>
   skipped: Array<{
+    index: number
+    magnet: string
     code: string
     reason: string
     existing_location: string
+    task_id?: string
+  }>
+  failed: Array<{
+    index: number
+    magnet: string
+    code: string
+    reason: string
+    message: string
+    task_id?: string | null
   }>
 }
 
@@ -97,7 +116,6 @@ export interface BatchDownloadResponse {
 export type TaskStatusType = 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled'
 
 export interface DownloadTask {
-  id: number
   task_id: string
   code: string
   magnet: string
@@ -106,11 +124,29 @@ export interface DownloadTask {
   speed: string | null
   total_size: number
   downloaded_size: number
+  downloaded_size_is_estimate: boolean
+  phase: 'offline_download'
   target_path: string
   openlist_task_id: string | null
   error_message: string | null
   created_at: string
   updated_at: string
+}
+
+export interface TransferTask {
+  task_id: string
+  name: string
+  phase: 'offline_download_transfer'
+  status: TaskStatusType
+  state: number
+  status_detail: string
+  progress: number
+  total_size: number
+  downloaded_size: number
+  downloaded_size_is_estimate: boolean
+  error_message: string | null
+  start_time: string | null
+  end_time: string | null
 }
 
 export interface TaskListResponse {
@@ -163,6 +199,7 @@ export interface StorageNodeInfo {
   used_space: number | null
   free_space: number | null
   space_source: 'openlist' | 'manual'
+  space_error?: string | null
 }
 
 export interface StorageGroupPath {
@@ -175,6 +212,7 @@ export interface StorageGroup {
   id: number
   name: string
   paths: StorageGroupPath[]
+  storage_paths: string[]
   created_at: string
 }
 
@@ -221,5 +259,10 @@ export interface ConnectionTestResult {
   version?: string | null
   latency_ms?: number | null
   service_name?: string | null
+  stats?: {
+    active_torrents?: number
+    active_locks?: number
+    dlq_entries?: number
+    active_itorrents_requests?: number
+  }
 }
-

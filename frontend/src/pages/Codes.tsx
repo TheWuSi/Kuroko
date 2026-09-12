@@ -5,6 +5,25 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { EmptyState } from '@/components/common/EmptyState'
 import {
   Sheet,
@@ -22,6 +41,7 @@ import {
   Copy,
   Check,
   Loader2,
+  MoreVertical,
 } from 'lucide-react'
 import { codeService } from '@/services/code.service'
 import { storageService } from '@/services/storage.service'
@@ -45,6 +65,7 @@ export function Codes() {
   const [selectedScanGroup, setSelectedScanGroup] = useState<number | undefined>(undefined)
 
   const [copiedCode, setCopiedCode] = useState<string | null>(null)
+  const [deletingCode, setDeletingCode] = useState<string | null>(null)
 
   // 搜索防抖
   useEffect(() => {
@@ -100,57 +121,57 @@ export function Codes() {
   const pollScanStatus = (taskId?: string) => {
     const timer = setInterval(async () => {
       try {
-        const status = await codeService.getScanStatus(taskId)
-        setScanStatus(status)
-        if (status.status === 'completed' || status.status === 'failed') {
+        const s = await codeService.getScanStatus(taskId)
+        setScanStatus(s)
+        if (s.status === 'completed' || s.status === 'failed' || s.status === 'cancelled') {
           clearInterval(timer)
           setScanning(false)
           fetchCodes()
-          if (status.status === 'completed') {
-            toast.success(`扫描完成，新发现 ${status.new_codes_found} 个番号`)
-          } else {
-            toast.error(`扫描异常: ${status.error_message || '未知原因'}`)
+          if (s.status === 'completed') {
+            toast.success(`扫描完成: 新发现 ${s.new_codes_found} 部番号`)
           }
         }
       } catch {
         clearInterval(timer)
         setScanning(false)
       }
-    }, 1500)
+    }, 2000)
   }
 
-  // 删除番号
-  const handleDeleteCode = async (code: string) => {
-    if (!confirm(`确定要从统计表中移除番号 ${code} 吗？`)) return
+  // 确认删除番号
+  const confirmDeleteCode = async () => {
+    if (!deletingCode) return
     try {
-      await codeService.deleteCode(code)
-      toast.success(`番号 ${code} 已移除`)
+      await codeService.deleteCode(deletingCode)
+      toast.success(`番号 ${deletingCode} 已从归档中移除`)
       fetchCodes()
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '删除失败'
       toast.error(msg)
+    } finally {
+      setDeletingCode(null)
     }
   }
 
-  const handleCopy = (code: string) => {
-    navigator.clipboard.writeText(code)
-    setCopiedCode(code)
+  const handleCopy = (text: string, id: string, label: string) => {
+    navigator.clipboard.writeText(text)
+    setCopiedCode(id)
     setTimeout(() => setCopiedCode(null), 2000)
-    toast.info(`番号 ${code} 已复制`)
+    toast.info(`已复制${label}: ${text}`)
   }
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="番号媒体库归档"
-        description={`共计收录 ${total} 部番号资产，支持定向探测与离线下载自动增量入库`}
+        description={`共计收录 ${total} 部番号资产，通过定向扫描确认实际落地文件`}
       >
         <Button
           onClick={() => {
             setScanOpen(true)
             codeService.getScanStatus().then((s) => setScanStatus(s)).catch(() => {})
           }}
-          className="gap-2 bg-blue-600 hover:bg-blue-700"
+          className="gap-2 bg-blue-600 hover:bg-blue-700 min-h-[44px] sm:min-h-[36px]"
         >
           <Radar className="h-4 w-4" />
           定向探测扫描
@@ -173,8 +194,25 @@ export function Codes() {
         </div>
       </div>
 
-      {/* 番号网格卡片流 */}
-      {codes.length === 0 && !loading ? (
+      {/* 骨架屏加载状态 */}
+      {loading ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+            <Card key={i} className="p-4 space-y-3 border-slate-200/80">
+              <div className="flex justify-between items-center">
+                <Skeleton className="h-5 w-24" />
+                <Skeleton className="h-5 w-5 rounded-md" />
+              </div>
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-3/4" />
+              <div className="flex justify-between pt-2">
+                <Skeleton className="h-3 w-16" />
+                <Skeleton className="h-3 w-12" />
+              </div>
+            </Card>
+          ))}
+        </div>
+      ) : codes.length === 0 ? (
         <EmptyState
           title="未找到番号记录"
           description={search ? '没有匹配该关键词的番号' : '暂无收录数据，可点击右上角启动定向扫描'}
@@ -188,43 +226,89 @@ export function Codes() {
             >
               <CardContent className="p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="font-mono text-base font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
+                  <span className="font-mono text-base font-bold text-slate-900 group-hover:text-blue-600 transition-colors truncate mr-2">
                     {item.code}
                   </span>
+
                   <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => handleCopy(item.code)}
-                      className="p-1.5 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 cursor-pointer"
-                      title="复制番号"
-                    >
-                      {copiedCode === item.code ? (
-                        <Check className="h-3.5 w-3.5 text-emerald-600" />
-                      ) : (
-                        <Copy className="h-3.5 w-3.5" />
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteCode(item.code)}
-                      className="p-1.5 text-slate-400 hover:text-rose-600 rounded-md hover:bg-rose-50 cursor-pointer"
-                      title="从归档移除"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => handleCopy(item.code, item.code, '番号')}
+                          className="p-1.5 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 cursor-pointer"
+                        >
+                          {copiedCode === item.code ? (
+                            <Check className="h-3.5 w-3.5 text-emerald-600" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>复制番号</TooltipContent>
+                    </Tooltip>
+
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          className="p-1.5 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 cursor-pointer"
+                        >
+                          <MoreVertical className="h-3.5 w-3.5" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-40">
+                        <DropdownMenuItem
+                          onClick={() => handleCopy(item.code, item.code, '番号')}
+                          className="cursor-pointer gap-2"
+                        >
+                          <Copy className="h-4 w-4" />
+                          <span>复制番号</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => handleCopy(item.storage_path, `${item.code}-p`, '存放路径')}
+                          className="cursor-pointer gap-2"
+                        >
+                          <HardDrive className="h-4 w-4" />
+                          <span>复制存放路径</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onClick={() => setDeletingCode(item.code)}
+                          className="cursor-pointer gap-2 text-rose-600 focus:text-rose-600 focus:bg-rose-50"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          <span>从归档移除</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </div>
 
                 <div className="space-y-1.5 text-xs text-slate-500 font-mono">
-                  <div className="flex items-center gap-1.5 truncate" title={item.file_name}>
-                    <Film className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                    <span className="truncate">{item.file_name}</span>
-                  </div>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="flex items-center gap-1.5 truncate cursor-help">
+                        <Film className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        <span className="truncate">{item.file_name}</span>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-md break-all">
+                      文件名: {item.file_name}
+                    </TooltipContent>
+                  </Tooltip>
 
-                  <div className="flex items-center gap-1.5 truncate" title={item.storage_path}>
-                    <HardDrive className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                    <span className="truncate">{item.storage_path}</span>
-                  </div>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="flex items-center gap-1.5 truncate cursor-help">
+                        <HardDrive className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        <span className="truncate">{item.storage_path}</span>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-md break-all">
+                      路径: {item.storage_path}
+                    </TooltipContent>
+                  </Tooltip>
 
                   <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-[11px]">
                     <span>{formatBytes(item.file_size)}</span>
@@ -247,6 +331,7 @@ export function Codes() {
             size="sm"
             disabled={page <= 1 || loading}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
+            className="min-h-[44px] sm:min-h-[36px]"
           >
             上一页
           </Button>
@@ -258,6 +343,7 @@ export function Codes() {
             size="sm"
             disabled={page >= Math.ceil(total / 24) || loading}
             onClick={() => setPage((p) => p + 1)}
+            className="min-h-[44px] sm:min-h-[36px]"
           >
             下一页
           </Button>
@@ -302,7 +388,7 @@ export function Codes() {
             <Button
               onClick={handleStartScan}
               disabled={scanning}
-              className="w-full h-11 text-base font-semibold gap-2"
+              className="w-full min-h-[44px] text-base font-semibold gap-2"
             >
               {scanning ? (
                 <>
@@ -380,6 +466,27 @@ export function Codes() {
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* 删除番号确认模态框 AlertDialog */}
+      <AlertDialog open={Boolean(deletingCode)} onOpenChange={(open) => !open && setDeletingCode(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认从番号库归档移除？</AlertDialogTitle>
+            <AlertDialogDescription>
+              将番号 <span className="font-mono font-bold text-slate-900">{deletingCode}</span> 从本地索引数据库中删除。注意：这不会删除网盘云端实际媒体文件。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDeleteCode}
+              className="bg-rose-600 hover:bg-rose-700 text-white"
+            >
+              确认移除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

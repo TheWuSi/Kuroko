@@ -235,46 +235,38 @@ erDiagram
 
 ---
 
-## 5. 部署与协同编排
+## 5. 上游接入与任务边界
 
-系统提供 `docker-compose.yml`，支持一键拉起全套微服务：
+兼容基线为 **OpenList v4.2.6** 与 **magnet-metadata-api 0.1.0**。接口索引以 [OpenList llms.txt](https://fox.oplist.org/llms.txt) 为入口，任务状态与删除策略同时依据对应版本源码核对。
 
-```yaml
-services:
-  kuroko:
-    image: ghcr.io/<owner>/kuroko:latest
-    container_name: kuroko
-    restart: unless-stopped
-    ports:
-      - "${BACKEND_PORT:-8000}:8000"
-    volumes:
-      - ./config:/app/config
-      - ./data:/app/data
-      - ./logs:/app/logs
-    environment:
-      - BACKEND_PORT=8000
-      - KUROKO_SECRET_KEY=${KUROKO_SECRET_KEY:-kuroko-secret-change-in-prod}
-      - BT_PARSER_SERVICE_URL=http://magnet-metadata-api:8080
-    depends_on:
-      - magnet-metadata-api
+| 上游操作 | HTTP 接口 | 关键约定 |
+| :--- | :--- | :--- |
+| OpenList 登录 | `POST /api/auth/login` | 获取原始令牌；鉴权失效最多重登一次 |
+| 验证权限 | `GET /api/me` | 存储管理需要管理员权限 |
+| 存储列表 | `GET /api/admin/storage/list` | 使用真实 ID，完整分页，读取 `mount_details` |
+| 原生容量回退 | `POST /api/fs/get` | 查询挂载根目录的 `mount_details` |
+| 文件目录 | `POST /api/fs/list` | 完整分页；路径边界、大小、重复页与时间预算检查 |
+| 离线工具 | `GET /api/public/offline_download_tools` | 检查目标路径能否使用 PikPak |
+| 离线提交 | `POST /api/fs/add_offline_download` | `tool: PikPak`、`delete_policy: delete_always`；任务 ID 位于 `data.tasks[].id` |
+| 离线/转存列表 | `GET /api/task/{kind}/undone`、`done` | `kind` 分别为 `offline_download` 与 `offline_download_transfer` |
+| 单任务/取消 | `POST /api/task/{kind}/info`、`cancel` | `tid` 为查询参数 |
+| 磁力元数据 | `POST /api/v1/metadata` | 请求 `magnet_uri`，响应顶层 `info_hash/name/size/files` |
+| 元数据健康 | `GET /api/v1/health` | `status: ok` 和真实 `stats`，不推测 DHT 状态 |
 
-  magnet-metadata-api:
-    image: felipemarinho97/magnet-metadata-api:latest
-    container_name: kuroko-magnet-metadata
-    restart: unless-stopped
-    ports:
-      - "${METADATA_PORT:-8080}:8080"
-    environment:
-      - PORT=8080
-      - REDIS_URL=redis://redis:6379/0
-      - CACHE_TTL_HOURS=168
-    depends_on:
-      - redis
+OpenList 请求使用原始 `Authorization: <token>`，成功必须同时满足 HTTP 成功及业务 `code=200`。元数据服务没有内建认证；可选 Bearer token 仅用于外部认证代理。客户端复用连接并在使用结束后关闭，不把上游错误正文或存储 `addition` 中的凭据返回给前端。
 
-  redis:
-    image: redis:7-alpine
-    container_name: kuroko-redis
-    restart: unless-stopped
-    volumes:
-      - ./data/redis:/data
-```
+下载提交先保存本地待处理记录，成功后逐条持久化上游任务 ID。指定目录直接使用；未指定时以完整种子大小做分组调度，保守预留尚在等待/下载的任务容量。网络中断或提交响应异常时保留待核实任务，不自动重新下发。容量是上游快照，不能保证其他客户端并发写入后的剩余空间。
+
+后台同步在工作线程中创建并关闭数据库会话，不阻塞异步 API。OpenList 的数字状态以 tache v0.2.2 为准，取消中、重试中、等待重试等状态持续轮询。离线完成不表示独立转存完成；上游未提供公开的父子任务关联，因此转存列表独立展示，番号库只接受定向扫描发现的真实文件。
+
+容量缺失时，先查询挂载根目录，手动配额再回退为当前挂载内完整统计。查询与统计有 30 秒共享预算；超过目录/文件上限、遇到独立子挂载或上游失败时返回 `space_error`，不使用部分扫描结果计算剩余空间。OneDrive 的原生容量开关、授权和请求延迟可能导致它与 GoogleDrive 表现不同。
+
+## 6. 部署与协同编排
+
+可执行配置以根目录 [docker-compose.yml](../../docker-compose.yml) 为准：Kuroko 整合前端静态文件，依赖元数据服务健康，元数据服务依赖 Redis 健康。
+
+- 元数据镜像固定为 `felipemarinho97/magnet-metadata-api:0.1.0`，缓存显式设置为 `/app/cache` 并持久化。
+- `CLIENT_PORT` 与宿主机 TCP/UDP 映射保持一致，默认 42069；健康检查使用 `/api/v1/health`。
+- Redis 使用 AOF 与独立数据卷；不使用上游未支持的缓存 TTL 环境变量。
+- Kuroko 使用 `KUROKO_BT_PARSER_SERVICE_URL` 配置容器内解析地址；数据库中的已保存配置优先于环境默认值。
+- 本地验证执行 `docker compose config --quiet`；集成测试使用隔离数据库及 HTTP transport，不连接真实网盘。

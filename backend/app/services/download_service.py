@@ -42,10 +42,13 @@ def normalize_task(remote: dict[str, Any]) -> dict[str, Any]:
     if total is None:
         raise OpenListError("OpenList 返回了无效的任务大小")
     return {
-        "status": STATE_STATUS[state], "progress": progress, "total_size": total,
+        "status": STATE_STATUS[state],
+        "progress": progress,
+        "total_size": total,
         "downloaded_size": int(total * progress / 100),
         "error_message": remote.get("error") or None,
-        "state": state, "status_detail": remote.get("status") or "",
+        "state": state,
+        "status_detail": remote.get("status") or "",
     }
 
 
@@ -62,6 +65,34 @@ def _find_group(db: Session, target: str | int | None) -> StorageGroup:
     return group
 
 
+def _active_reservations(db: Session, mounts: list[dict[str, Any]]) -> dict[str, int]:
+    reserved: dict[str, int] = {}
+    active = (
+        db.query(DownloadTask)
+        .filter(
+            DownloadTask.status.in_([TaskStatus.pending.value, TaskStatus.downloading.value]),
+        )
+        .all()
+    )
+    # 浏览器逐条投递也必须计入此前任务。保守预留完整体积，避免上游容量尚未更新时过量分配。
+    for task in active:
+        try:
+            storage, _ = resolve_storage_path(task.target_path, mounts)
+        except ValueError:
+            continue
+        mount = storage["mount_path"]
+        reserved[mount] = reserved.get(mount, 0) + task.total_size
+    return reserved
+
+
+def _same_magnet(left: str, info_hash: str) -> bool:
+    try:
+        return magnet_info_hash(left) == info_hash
+    except ValueError:
+        # 旧数据可能含未校验的 Hash，不应影响新任务提交。
+        return False
+
+
 def submit_batch(db: Session, tasks: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     submitted, skipped, failed = [], [], []
     config = get_config(db, masked=False)["bt_parser"]
@@ -69,9 +100,14 @@ def submit_batch(db: Session, tasks: list[dict[str, Any]]) -> dict[str, list[dic
     metadata_cache: dict[str, dict[str, Any]] = {}
     checked_paths: set[str] = set()
     reserved: dict[str, int] = {}
-    with get_client(db) as client, MagnetMetadataApiClient(
-        config["service_url"], config["token"], config["timeout_seconds"],
-    ) as parser:
+    with (
+        get_client(db) as client,
+        MagnetMetadataApiClient(
+            config["service_url"],
+            config["token"],
+            config["timeout_seconds"],
+        ) as parser,
+    ):
         for index, item in enumerate(tasks):
             task: DownloadTask | None = None
             try:
@@ -79,13 +115,19 @@ def submit_batch(db: Session, tasks: list[dict[str, Any]]) -> dict[str, list[dic
                 code = item["code"]
                 existing = db.query(CodeRecord).filter(CodeRecord.code == code).first()
                 if existing and not item.get("force", False):
-                    skipped.append({
-                        "index": index, "code": code, "magnet": magnet, "reason": "already_exists",
-                        "existing_location": f"{existing.storage_path}/{existing.file_name}",
-                    })
+                    skipped.append(
+                        {
+                            "index": index,
+                            "code": code,
+                            "magnet": magnet,
+                            "reason": "already_exists",
+                            "existing_location": f"{existing.storage_path}/{existing.file_name}",
+                        }
+                    )
                     continue
                 if mounts is None:
                     mounts = client.get_storage_info()
+                    reserved = _active_reservations(db, mounts)
                 info_hash = magnet_info_hash(magnet)
                 if info_hash not in metadata_cache:
                     metadata_cache[info_hash] = parser.parse_with_fallback(magnet)
@@ -97,20 +139,35 @@ def submit_batch(db: Session, tasks: list[dict[str, Any]]) -> dict[str, list[dic
                     if infos is None:
                         infos = storage_info(db, client=client, remote=mounts)
                     target, _ = choose_target(
-                        db, _find_group(db, item.get("target_group")), size, infos=infos, reserved=reserved,
+                        db,
+                        _find_group(db, item.get("target_group")),
+                        size,
+                        infos=infos,
+                        reserved=reserved,
                     )
                 storage, _ = resolve_storage_path(target, mounts)
                 if storage["status"] != "work":
                     raise ValueError("目标存储当前不可用")
-                active = db.query(DownloadTask).filter(
-                    DownloadTask.magnet == magnet, DownloadTask.target_path == target,
-                    DownloadTask.status.in_([TaskStatus.pending.value, TaskStatus.downloading.value]),
-                ).first()
+                active_tasks = (
+                    db.query(DownloadTask)
+                    .filter(
+                        DownloadTask.target_path == target,
+                        DownloadTask.status.in_([TaskStatus.pending.value, TaskStatus.downloading.value]),
+                    )
+                    .all()
+                )
+                active = next((task for task in active_tasks if _same_magnet(task.magnet, info_hash)), None)
                 if active:
-                    skipped.append({
-                        "index": index, "code": code, "magnet": magnet, "reason": "already_submitted",
-                        "existing_location": target, "task_id": active.task_id,
-                    })
+                    skipped.append(
+                        {
+                            "index": index,
+                            "code": code,
+                            "magnet": magnet,
+                            "reason": "already_submitted",
+                            "existing_location": target,
+                            "task_id": active.task_id,
+                        }
+                    )
                     continue
                 if target not in checked_paths:
                     try:
@@ -131,22 +188,41 @@ def submit_batch(db: Session, tasks: list[dict[str, Any]]) -> dict[str, list[dic
                 task.openlist_task_id = client.add_offline_download(magnet, target)
                 db.commit()
                 reserved[storage["mount_path"]] = reserved.get(storage["mount_path"], 0) + size
-                submitted.append({
-                    "index": index, "code": code, "magnet": magnet, "task_id": task.task_id,
-                    "target_path": target, "openlist_task_id": task.openlist_task_id,
-                    "total_size": size, "metadata_fallback": metadata["metadata_fallback"],
-                })
+                submitted.append(
+                    {
+                        "index": index,
+                        "code": code,
+                        "magnet": magnet,
+                        "task_id": task.task_id,
+                        "target_path": target,
+                        "openlist_task_id": task.openlist_task_id,
+                        "total_size": size,
+                        "metadata_fallback": metadata["metadata_fallback"],
+                    }
+                )
             except (OpenListError, ValueError) as exc:
+                unknown = isinstance(exc, OpenListError) and exc.outcome_unknown
                 if task is not None:
-                    task.status = TaskStatus.failed.value
+                    # 无法确认的请求继续占位，避免再次点击或另一个请求重复创建上游任务。
+                    task.status = TaskStatus.pending.value if unknown else TaskStatus.failed.value
                     task.error_message = str(exc)
                     db.commit()
-                failed.append({
-                    "index": index, "code": item["code"], "magnet": item["magnet"],
-                    "task_id": task.task_id if task else None, "message": str(exc),
-                    "reason": "submission_unknown" if isinstance(exc, OpenListError) and exc.outcome_unknown
-                    else "upstream_error" if isinstance(exc, OpenListError) else "invalid_target",
-                })
+                    if unknown:
+                        reserved[storage["mount_path"]] = reserved.get(storage["mount_path"], 0) + size
+                failed.append(
+                    {
+                        "index": index,
+                        "code": item["code"],
+                        "magnet": item["magnet"],
+                        "task_id": task.task_id if task else None,
+                        "message": str(exc),
+                        "reason": "submission_unknown"
+                        if unknown
+                        else "upstream_error"
+                        if isinstance(exc, OpenListError)
+                        else "invalid_target",
+                    }
+                )
     return {"submitted": submitted, "skipped": skipped, "failed": failed}
 
 
@@ -165,10 +241,14 @@ def apply_remote_task(task: DownloadTask, remote: dict[str, Any]) -> None:
 
 
 def sync_tasks(db: Session) -> list[DownloadTask]:
-    tasks = db.query(DownloadTask).filter(
-        DownloadTask.status.in_([TaskStatus.pending.value, TaskStatus.downloading.value]),
-        DownloadTask.openlist_task_id.is_not(None),
-    ).all()
+    tasks = (
+        db.query(DownloadTask)
+        .filter(
+            DownloadTask.status.in_([TaskStatus.pending.value, TaskStatus.downloading.value]),
+            DownloadTask.openlist_task_id.is_not(None),
+        )
+        .all()
+    )
     if not tasks:
         return []
     updated = []

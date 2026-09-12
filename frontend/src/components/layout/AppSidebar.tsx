@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router'
+import { NavLink, useNavigate } from 'react-router'
 import {
   LayoutDashboard,
   Magnet,
@@ -8,9 +8,19 @@ import {
   Settings,
   LogOut,
   Sparkles,
+  ChevronsUpDown,
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
 import { cn } from '@/lib/utils'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 const navItems = [
   { path: '/dashboard', label: '总览看板', icon: LayoutDashboard },
@@ -23,6 +33,9 @@ const navItems = [
 
 export function AppSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { user, logout } = useAuthStore()
+  const navigate = useNavigate()
+
+  const userInitial = user?.username ? user.username.slice(0, 2).toUpperCase() : 'OP'
 
   return (
     <aside className="w-64 h-full flex flex-col bg-white border-r border-slate-200/80 select-none">
@@ -36,7 +49,7 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void }) {
             Kuroko
           </span>
           <span className="text-[11px] text-slate-400 font-mono block mt-1">
-            Media Ingestion
+            Media Ingestion v2.1
           </span>
         </div>
       </div>
@@ -66,23 +79,76 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void }) {
         })}
       </nav>
 
-      {/* 底部用户信息与登出 */}
+      {/* 底部用户信息与 DropdownMenu */}
       <div className="p-4 border-t border-slate-200/80">
-        <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50">
-          <div className="min-w-0 flex-1 mr-2">
-            <p className="text-xs text-slate-400 font-mono uppercase">Operator</p>
-            <p className="text-sm font-medium text-slate-800 truncate">
-              {user?.username || '管理员'}
-            </p>
-          </div>
-          <button
-            onClick={logout}
-            title="退出登录"
-            className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-          >
-            <LogOut className="h-4 w-4" />
-          </button>
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="w-full flex items-center justify-between p-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer text-left focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 min-h-[44px]"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <Avatar className="h-8 w-8 rounded-lg bg-blue-100 text-blue-700 font-bold border border-blue-200 shrink-0">
+                  <AvatarFallback className="rounded-lg text-xs font-mono">
+                    {userInitial}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold text-slate-800 truncate">
+                    {user?.username || '管理员'}
+                  </p>
+                  <p className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    在线 · {user?.role || 'admin'}
+                  </p>
+                </div>
+              </div>
+              <ChevronsUpDown className="h-4 w-4 text-slate-400 shrink-0 ml-1" />
+            </button>
+          </DropdownMenuTrigger>
+
+          <DropdownMenuContent align="end" className="w-56 p-1.5 mb-2 shadow-lg">
+            <DropdownMenuLabel className="font-normal px-2.5 py-2">
+              <div className="flex flex-col space-y-1">
+                <p className="text-sm font-semibold text-slate-900 leading-none">
+                  {user?.username || '管理员'}
+                </p>
+                <p className="text-xs text-slate-400 font-mono">
+                  {user?.role === 'admin' ? '系统超级管理员' : '系统操作员'}
+                </p>
+              </div>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => {
+                navigate('/settings')
+                onNavigate?.()
+              }}
+              className="cursor-pointer gap-2 py-2"
+            >
+              <Settings className="h-4 w-4 text-slate-500" />
+              <span>系统设置</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                navigate('/storages')
+                onNavigate?.()
+              }}
+              className="cursor-pointer gap-2 py-2"
+            >
+              <HardDrive className="h-4 w-4 text-slate-500" />
+              <span>存储拓扑</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={logout}
+              className="cursor-pointer gap-2 py-2 text-rose-600 focus:text-rose-600 focus:bg-rose-50"
+            >
+              <LogOut className="h-4 w-4" />
+              <span>退出登录</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </aside>
   )
