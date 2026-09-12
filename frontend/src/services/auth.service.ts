@@ -1,10 +1,10 @@
 import { apiClient, setStoredToken, removeStoredToken } from './client'
-import type { ApiResponse, LoginResponse, SystemStatus, User } from '@/types/api'
+import type { ApiResponse, BootstrapStatus, LoginResponse, TokenData, User } from '@/types/api'
 
 export const authService = {
-  // 检查系统初始状态（是否已初始化/已认证）
-  async getStatus(): Promise<SystemStatus> {
-    const res = await apiClient.get<ApiResponse<SystemStatus>>('/auth/status')
+  // 检查系统是否已初始化（创建首个管理员）
+  async getBootstrapStatus(): Promise<BootstrapStatus> {
+    const res = await apiClient.get<ApiResponse<BootstrapStatus>>('/auth/bootstrap-status')
     return res.data.data
   },
 
@@ -21,9 +21,9 @@ export const authService = {
     return data
   },
 
-  // 系统初始化（首次创建管理员）
-  async bootstrap(username: string, password: string): Promise<LoginResponse> {
-    const res = await apiClient.post<ApiResponse<LoginResponse>>('/auth/bootstrap', {
+  // 系统初始化（首次创建管理员账号）
+  async bootstrap(username: string, password: string): Promise<TokenData> {
+    const res = await apiClient.post<ApiResponse<TokenData>>('/auth/bootstrap', {
       username,
       password,
     })
@@ -45,3 +45,4 @@ export const authService = {
     removeStoredToken()
   },
 }
+

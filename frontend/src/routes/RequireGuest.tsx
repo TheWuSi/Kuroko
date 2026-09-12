@@ -15,7 +15,10 @@ export function RequireGuest() {
   if (loading && initialized === null) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+          <p className="text-sm font-medium text-slate-500">正在检查系统状态...</p>
+        </div>
       </div>
     )
   }
@@ -32,3 +35,4 @@ export function RequireGuest() {
 
   return <Outlet />
 }
+

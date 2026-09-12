@@ -38,15 +38,28 @@ apiClient.interceptors.response.use(
   (error: AxiosError<ApiResponse<unknown>>) => {
     if (error.response?.status === 401) {
       localStorage.removeItem(TOKEN_KEY)
-      // 非登录页时跳转
+      // 非登录页且非初始化页时自动跳转回登录页
       if (window.location.pathname !== '/login' && window.location.pathname !== '/bootstrap') {
         window.location.href = '/login'
       }
     }
-    const message =
-      error.response?.data?.message ||
-      error.message ||
-      '网络请求异常，请稍后重试'
+
+    const data = error.response?.data as unknown as
+      | { message?: string; detail?: string | Array<{ msg?: string; loc?: string[] }> }
+      | undefined
+
+    let message = '网络请求异常，请稍后重试'
+    if (data?.message) {
+      message = data.message
+    } else if (typeof data?.detail === 'string') {
+      message = data.detail
+    } else if (Array.isArray(data?.detail) && data.detail.length > 0) {
+      const first = data.detail[0]
+      message = first?.msg ? `输入验证失败: ${first.msg}` : '输入参数校验失败'
+    } else if (error.message) {
+      message = error.message
+    }
+
     return Promise.reject(new Error(message))
   }
 )
@@ -62,3 +75,4 @@ export function setStoredToken(token: string): void {
 export function removeStoredToken(): void {
   localStorage.removeItem(TOKEN_KEY)
 }
+

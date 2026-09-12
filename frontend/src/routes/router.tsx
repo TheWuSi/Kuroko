@@ -2,6 +2,7 @@ import { createBrowserRouter, Navigate } from 'react-router'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { RequireAuth } from './RequireAuth'
 import { RequireGuest } from './RequireGuest'
+import { RequireBootstrap } from './RequireBootstrap'
 import { Login } from '@/pages/Login'
 import { Bootstrap } from '@/pages/Bootstrap'
 import { Dashboard } from '@/pages/Dashboard'
@@ -13,7 +14,7 @@ import { Settings } from '@/pages/Settings'
 import { NotFound } from '@/pages/NotFound'
 
 export const router = createBrowserRouter([
-  // 游客路由（登录页，已登录自动跳转 /dashboard）
+  // 游客路由（登录页，若未初始化重定向到 /bootstrap，已登录跳转到 /dashboard）
   {
     element: <RequireGuest />,
     children: [
@@ -23,10 +24,15 @@ export const router = createBrowserRouter([
       },
     ],
   },
-  // 初始化路由
+  // 初始化路由（仅在系统尚未创建首个管理员时开放）
   {
-    path: '/bootstrap',
-    element: <Bootstrap />,
+    element: <RequireBootstrap />,
+    children: [
+      {
+        path: '/bootstrap',
+        element: <Bootstrap />,
+      },
+    ],
   },
   // 受保护应用路由
   {
@@ -72,3 +78,4 @@ export const router = createBrowserRouter([
     ],
   },
 ])
+

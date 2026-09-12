@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { User } from '@/types/api'
 import { authService } from '@/services/auth.service'
-import { getStoredToken } from '@/services/client'
+import { getStoredToken, removeStoredToken } from '@/services/client'
 
 interface AuthState {
   token: string | null
@@ -9,6 +9,7 @@ interface AuthState {
   initialized: boolean | null
   loading: boolean
   checkAuth: () => Promise<boolean>
+  setInitialized: (val: boolean) => void
   setUser: (user: User | null) => void
   logout: () => void
 }
@@ -22,35 +23,43 @@ export const useAuthStore = create<AuthState>((set) => ({
   checkAuth: async () => {
     set({ loading: true })
     try {
-      const status = await authService.getStatus()
-      set({
-        initialized: status.initialized,
-        token: getStoredToken(),
-      })
+      // 1. 优先调用真实后端 /auth/bootstrap-status 检查是否已完成系统初始化
+      const status = await authService.getBootstrapStatus()
+      const isInitialized = Boolean(status?.initialized)
+      set({ initialized: isInitialized })
 
-      if (!status.initialized) {
-        set({ user: null, loading: false })
+      // 2. 若尚未初始化，必须强制清理凭据并返回 false，引导去初始化向导
+      if (!isInitialized) {
+        removeStoredToken()
+        set({ token: null, user: null, loading: false })
         return false
       }
 
-      if (status.authenticated && getStoredToken()) {
-        try {
-          const user = await authService.getCurrentUser()
-          set({ user, loading: false })
-          return true
-        } catch {
-          set({ user: null, loading: false })
-          return false
-        }
+      // 3. 若已初始化，检查是否有 Token
+      const storedToken = getStoredToken()
+      if (!storedToken) {
+        set({ token: null, user: null, loading: false })
+        return false
       }
 
-      set({ user: null, loading: false })
-      return false
+      // 4. 验证 Token 有效性并拉取当前用户信息
+      try {
+        const user = await authService.getCurrentUser()
+        set({ token: storedToken, user, loading: false })
+        return true
+      } catch {
+        // Token 失效或被注销
+        removeStoredToken()
+        set({ token: null, user: null, loading: false })
+        return false
+      }
     } catch {
       set({ loading: false })
       return false
     }
   },
+
+  setInitialized: (val: boolean) => set({ initialized: val }),
 
   setUser: (user) => set({ user }),
 
@@ -59,3 +68,5 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ token: null, user: null })
   },
 }))
+
+

@@ -13,21 +13,33 @@ export interface ApiResponse<T = unknown> {
 export interface User {
   id: number
   username: string
+  role?: string
   created_at: string
+}
+
+export interface BootstrapStatus {
+  initialized: boolean
+}
+
+export interface TokenData {
+  token: string
+  token_type: string
+  expires_at: string
 }
 
 export interface LoginResponse {
   token: string
+  refresh_token?: string
   token_type: string
-  expires_in: number
-  user: User
+  expires_at: string
+  refresh_expires_at?: string
 }
 
 export interface SystemStatus {
   initialized: boolean
   authenticated: boolean
   user: User | null
-  version: string
+  version?: string
 }
 
 /**
@@ -210,3 +222,4 @@ export interface ConnectionTestResult {
   latency_ms?: number | null
   service_name?: string | null
 }
+

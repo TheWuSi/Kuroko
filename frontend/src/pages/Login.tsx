@@ -1,9 +1,9 @@
-import React, { useState } from 'react'
-import { useNavigate } from 'react-router'
+import React, { useState, useEffect } from 'react'
+import { useNavigate, Link } from 'react-router'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Sparkles, KeyRound, User as UserIcon, Loader2 } from 'lucide-react'
+import { Sparkles, KeyRound, User as UserIcon, Loader2, AlertCircle, ShieldAlert } from 'lucide-react'
 import { authService } from '@/services/auth.service'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/uiStore'
@@ -13,18 +13,31 @@ export function Login() {
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const navigate = useNavigate()
-  const checkAuth = useAuthStore((s) => s.checkAuth)
+  const { initialized, checkAuth } = useAuthStore()
+
+  // 若检测到系统尚未完成初始化，自动引导进入初始化向导
+  useEffect(() => {
+    if (initialized === false) {
+      navigate('/bootstrap', { replace: true })
+    }
+  }, [initialized, navigate])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!username.trim() || !password) {
+    const trimmedUser = username.trim()
+    if (!trimmedUser || !password) {
       toast.warning('请输入用户名和密码')
+      return
+    }
+
+    if (password.length < 8) {
+      toast.warning('密码长度至少为 8 位字符')
       return
     }
 
     setSubmitting(true)
     try {
-      await authService.login(username.trim(), password)
+      await authService.login(trimmedUser, password)
       toast.success('登录成功')
       await checkAuth()
       navigate('/dashboard', { replace: true })
@@ -50,6 +63,22 @@ export function Login() {
           </p>
         </div>
 
+        {/* 尚未初始化警示条（若状态未更新时的防御性提示） */}
+        {initialized === false && (
+          <div className="mb-4 p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-2.5">
+            <AlertCircle className="h-4 w-4 shrink-0 text-amber-600" />
+            <div className="flex-1">
+              检测到系统尚未初始化，请先创建首个超级管理员账号。
+            </div>
+            <Link
+              to="/bootstrap"
+              className="font-semibold text-amber-900 underline hover:text-amber-700 whitespace-nowrap"
+            >
+              前往初始化
+            </Link>
+          </div>
+        )}
+
         {/* 登录卡片 */}
         <Card className="shadow-lg border-slate-200/80">
           <CardHeader className="pb-4">
@@ -69,7 +98,7 @@ export function Login() {
                     required
                     autoFocus
                     className="pl-10"
-                    placeholder="请输入用户名"
+                    placeholder="请输入管理员用户名"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                   />
@@ -77,9 +106,12 @@ export function Login() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-700 block">
-                  密码
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-700 block">
+                    密码
+                  </label>
+                  <span className="text-[11px] text-slate-400">至少 8 位字符</span>
+                </div>
                 <div className="relative">
                   <KeyRound className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                   <Input
@@ -95,19 +127,27 @@ export function Login() {
 
               <Button
                 type="submit"
-                className="w-full mt-2 h-11 text-base font-semibold"
+                className="w-full mt-2 min-h-[44px] text-base font-semibold"
                 disabled={submitting}
               >
                 {submitting ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    正在登录...
+                    正在验证凭据...
                   </>
                 ) : (
                   '立即登录'
                 )}
               </Button>
             </form>
+
+            <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
+              <span className="flex items-center gap-1">
+                <ShieldAlert className="h-3.5 w-3.5 text-slate-400" />
+                受保护的内部管理系统
+              </span>
+              <span className="font-mono text-[11px]">v2.1</span>
+            </div>
           </CardContent>
         </Card>
       </div>
