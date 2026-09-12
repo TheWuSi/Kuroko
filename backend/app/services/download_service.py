@@ -24,7 +24,9 @@ def submit_batch(db: Session, tasks: list[dict[str, Any]]) -> dict[str, list[dic
         group = group_query.filter(StorageGroup.id == int(target_group)).first() if isinstance(target_group, int) or (isinstance(target_group, str) and target_group.isdigit()) else group_query.filter(StorageGroup.name == target_group).first() if target_group else group_query.first()
         if group is None:
             raise ValueError("未找到目标存储分组")
-        target_path, _ = choose_target(db, group, int(item.get("total_size", 0)))
+        target_root, _ = choose_target(db, group, int(item.get("total_size", 0)))
+        # 每个任务使用独立番号目录，避免同一挂载点的离线任务互相覆盖。
+        target_path = str(PurePosixPath(target_root) / item["code"])
         client: OpenListClient = get_client(db)
         openlist_task_id = client.add_offline_download(item["magnet"], target_path)
         task = DownloadTask(code=item["code"], magnet=item["magnet"], target_path=target_path, openlist_task_id=openlist_task_id, total_size=int(item.get("total_size", 0)))

@@ -7,18 +7,32 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models.config import SystemConfig
+from app.core.config import get_settings
 
 DEFAULTS: dict[str, Any] = {
     "openlist": {"base_url": "", "auth_type": "token", "username": "", "password": "", "token": ""},
-    "filter": {"allowed_extensions": [".mp4", ".mkv", ".avi", ".ts", ".wmv"], "min_file_size_mb": 100, "blacklist_patterns": []},
-    "bt_parser": {"service_url": "", "token": ""},
+    "filter": {"allowed_extensions": [".mp4", ".mkv", ".avi", ".ts", ".wmv"], "min_file_size_mb": 100, "blacklist_patterns": [], "code_patterns": []},
+    "bt_parser": {"service_url": "", "token": "", "timeout_seconds": 45},
     "probe_paths": [],
 }
 
 
 def _get_raw(db: Session, key: str) -> Any:
     row = db.query(SystemConfig).filter(SystemConfig.key == key).one_or_none()
-    return json.loads(row.value) if row else deepcopy(DEFAULTS[key])
+    if row:
+        try:
+            value = json.loads(row.value)
+            return value if isinstance(value, (dict, list)) else deepcopy(DEFAULTS[key])
+        except (TypeError, ValueError):
+            return deepcopy(DEFAULTS[key])
+    defaults = deepcopy(DEFAULTS[key])
+    # 环境变量只作为首次默认值，数据库中已有配置始终优先，避免启动时覆盖真实参数。
+    settings = get_settings()
+    if key == "openlist" and settings.openlist_base_url:
+        defaults["base_url"] = settings.openlist_base_url
+    if key == "bt_parser" and settings.bt_parser_service_url:
+        defaults["service_url"] = settings.bt_parser_service_url
+    return defaults
 
 
 def get_config(db: Session, *, masked: bool = True) -> dict[str, Any]:

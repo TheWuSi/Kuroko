@@ -23,15 +23,25 @@ class OpenListClient:
         token = self.token if self.token.lower().startswith("bearer ") else f"Bearer {self.token}"
         return {"Authorization": token}
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+    def _request_once(self, method: str, path: str, **kwargs: Any) -> tuple[int, Any]:
         if not self.base_url:
             raise OpenListError("未配置 OpenList 地址")
         try:
             response = httpx.request(method, f"{self.base_url}{path}", headers=self._headers(), timeout=20, **kwargs)
-            response.raise_for_status()
+            status_code = response.status_code
             data = response.json()
         except (httpx.HTTPError, ValueError) as exc:
             raise OpenListError(f"OpenList 请求失败: {type(exc).__name__}") from exc
+        return status_code, data
+
+    def _request(self, method: str, path: str, *, _retry_auth: bool = True, **kwargs: Any) -> dict[str, Any]:
+        status_code, data = self._request_once(method, path, **kwargs)
+        if status_code == 401 and self.auth_type == "password" and _retry_auth and self.username and self.password and path != "/api/auth/login":
+            self.token = ""
+            self.login()
+            return self._request(method, path, _retry_auth=False, **kwargs)
+        if status_code >= 400:
+            raise OpenListError(f"OpenList 请求失败: HTTP {status_code}")
         if isinstance(data, dict) and data.get("code") not in (None, 200, 0):
             raise OpenListError(f"OpenList 返回业务错误: {str(data.get('message') or data.get('msg') or 'unknown')[:200]}")
         return data.get("data", data) if isinstance(data, dict) else data
@@ -45,8 +55,11 @@ class OpenListClient:
         return token
 
     def test_connection(self) -> dict[str, Any]:
+        import time
+
+        started = time.perf_counter()
         data = self._request("GET", "/api/me")
-        return {"connected": True, "version": data.get("version") if isinstance(data, dict) else None, "latency_ms": None}
+        return {"connected": True, "version": data.get("version") if isinstance(data, dict) else None, "latency_ms": round((time.perf_counter() - started) * 1000, 1)}
 
     def list_files(self, path: str) -> list[dict[str, Any]]:
         data = self._request("POST", "/api/fs/list", json={"path": path, "page": 1, "per_page": 1000, "password": "", "refresh": False})

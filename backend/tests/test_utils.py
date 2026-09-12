@@ -26,3 +26,10 @@ def test_magnet_cleaner_rejects_invalid_hash() -> None:
 def test_code_extractor_normalizes_separator() -> None:
     assert extract_code("release abc_123 1080p") == "ABC-123"
     assert extract_code("no media code") is None
+
+
+def test_code_extractor_supports_catalog_variants() -> None:
+    assert extract_code("T28-001.mp4") == "T28-001"
+    assert extract_code("FC2_PPv_123.mkv") == "FC2-PPV-123"
+    assert extract_code("HEYZO-9999") == "HEYZO-9999"
+    assert extract_code("作品 12345678.mp4") == "12345678"

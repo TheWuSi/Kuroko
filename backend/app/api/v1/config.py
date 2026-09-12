@@ -10,6 +10,7 @@ from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.config import ConfigPatch, ConnectionTestRequest
 from app.services.config_service import get_config, update_config
+from app.services.magnet_metadata_client import MagnetMetadataApiClient, MagnetMetadataError
 from app.services.openlist_client import OpenListClient, OpenListError
 
 router = APIRouter(prefix="/config", tags=["Config"], dependencies=[Depends(get_current_user)])
@@ -42,4 +43,14 @@ def test_connection(payload: ConnectionTestRequest | None = None, db: Session = 
     try:
         return success(OpenListClient(config).test_connection())
     except OpenListError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/test-bt-parser")
+def test_bt_parser(db: Session = Depends(get_db)):
+    config = get_config(db, masked=False)["bt_parser"]
+    client = MagnetMetadataApiClient(config.get("service_url", ""), config.get("token", ""), config.get("timeout_seconds", 45))
+    try:
+        return success(client.test_connection())
+    except MagnetMetadataError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

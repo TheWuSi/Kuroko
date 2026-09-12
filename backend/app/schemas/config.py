@@ -31,6 +31,7 @@ class FilterConfig(BaseModel):
     allowed_extensions: list[str] = Field(default_factory=lambda: [".mp4", ".mkv", ".avi", ".ts", ".wmv"], min_length=1, max_length=100)
     min_file_size_mb: int = Field(100, ge=0, le=102400)
     blacklist_patterns: list[str] = Field(default_factory=list, max_length=100)
+    code_patterns: list[str] = Field(default_factory=list, max_length=20)
 
     @field_validator("allowed_extensions")
     @classmethod
@@ -54,10 +55,25 @@ class FilterConfig(BaseModel):
             normalized.append(value)
         return normalized
 
+    @field_validator("code_patterns")
+    @classmethod
+    def validate_code_patterns(cls, values: list[str]) -> list[str]:
+        normalized = []
+        for value in values:
+            if len(value) > 256:
+                raise ValueError("番号正则过长")
+            try:
+                re.compile(value)
+            except re.error as exc:
+                raise ValueError("番号正则格式无效") from exc
+            normalized.append(value)
+        return normalized
+
 
 class BtParserConfig(BaseModel):
     service_url: str = Field("", max_length=512)
     token: SecretStr | None = None
+    timeout_seconds: int = Field(45, ge=1, le=300)
 
     @field_validator("service_url")
     @classmethod

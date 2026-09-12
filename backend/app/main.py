@@ -14,6 +14,7 @@ from app.core.database import ensure_runtime_dirs, init_db
 from app.core.spa import mount_spa
 from app.services.download_service import sync_tasks
 from app.core.database import SessionLocal
+from app.services.code_service import recover_orphaned_scans
 
 
 async def _task_poller() -> None:
@@ -35,6 +36,11 @@ async def lifespan(_: FastAPI):
         raise RuntimeError("生产环境必须配置 KUROKO_SECRET_KEY")
     ensure_runtime_dirs()
     init_db()
+    recovery_db = SessionLocal()
+    try:
+        recover_orphaned_scans(recovery_db)
+    finally:
+        recovery_db.close()
     poller = asyncio.create_task(_task_poller())
     try:
         yield

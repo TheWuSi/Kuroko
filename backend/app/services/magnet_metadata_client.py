@@ -72,10 +72,14 @@ class MagnetMetadataApiClient:
             except (TypeError, ValueError):
                 size = 0
             normalized.append({"name": str(path), "path": str(path), "size": size, "offset": item.get("offset", 0)})
+        try:
+            total_size = max(0, int(payload.get("size") or sum(item["size"] for item in normalized)))
+        except (TypeError, ValueError):
+            total_size = sum(item["size"] for item in normalized)
         return {
             "info_hash": str(payload.get("info_hash") or ""),
             "name": str(payload.get("name") or ""),
-            "size": max(0, int(payload.get("size") or sum(item["size"] for item in normalized))),
+            "size": total_size,
             "files": normalized,
             "metadata_fallback": False,
         }

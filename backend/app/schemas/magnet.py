@@ -19,6 +19,22 @@ class DownloadRequest(BaseModel):
     target_group: str | int | None = None
     total_size: int = Field(0, ge=0)
 
+    @field_validator("code")
+    @classmethod
+    def validate_code(cls, value: str) -> str:
+        value = value.strip()
+        if not value or "/" in value or "\\" in value or ".." in value:
+            raise ValueError("番号格式无效")
+        return value[:64]
+
+    @field_validator("magnet")
+    @classmethod
+    def validate_magnet(cls, value: str) -> str:
+        value = value.strip()
+        if not value.lower().startswith("magnet:?"):
+            raise ValueError("必须提供磁力链接")
+        return value
+
 
 class BatchDownloadRequest(BaseModel):
     tasks: list[DownloadRequest] = Field(min_length=1, max_length=100)

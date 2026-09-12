@@ -1,6 +1,6 @@
 services:
   kuroko:
-    image: ghcr.io/<owner>/kuroko:latest
+    image: ${KUROKO_IMAGE:-ghcr.io/example/kuroko:latest}
     container_name: kuroko
     restart: unless-stopped
     ports:
@@ -16,3 +16,28 @@ services:
       - KUROKO_DATABASE_URL=${KUROKO_DATABASE_URL:-sqlite:///./data/kuroko.db}
       - KUROKO_TASK_POLL_SECONDS=${KUROKO_TASK_POLL_SECONDS:-30}
       - KUROKO_CORS_ORIGINS=${KUROKO_CORS_ORIGINS:-http://localhost:8000}
+      - KUROKO_BT_PARSER_SERVICE_URL=${BT_PARSER_SERVICE_URL:-http://magnet-metadata-api:8080}
+    depends_on:
+      magnet-metadata-api:
+        condition: service_started
+
+  magnet-metadata-api:
+    image: ${METADATA_API_IMAGE:-felipemarinho97/magnet-metadata-api:latest}
+    container_name: kuroko-magnet-metadata
+    restart: unless-stopped
+    ports:
+      - "${METADATA_API_PORT:-8080}:8080"
+    environment:
+      - PORT=8080
+      - REDIS_URL=redis://redis:6379/0
+      - CACHE_TTL_HOURS=${CACHE_TTL_HOURS:-168}
+    depends_on:
+      redis:
+        condition: service_started
+
+  redis:
+    image: redis:7-alpine
+    container_name: kuroko-redis
+    restart: unless-stopped
+    volumes:
+      - ${REDIS_DATA_DIR:-./data/redis}:/data
