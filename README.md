@@ -48,6 +48,15 @@ docker compose up -d --build
 
 首次访问会进入管理员初始化页面，不存在固定默认密码。生产环境如果仍使用 `change-me-in-production`，服务会拒绝启动。
 
+使用 GHCR 预构建镜像时，在 `.env` 中设置 `KUROKO_IMAGE=ghcr.io/<owner>/kuroko:<version>`，将 `<owner>` 和 `<version>` 替换为实际仓库所有者（小写）及镜像版本，然后执行：
+
+```bash
+docker compose pull kuroko
+docker compose up -d --no-build
+```
+
+更新时修改镜像版本并重复执行以上命令，继续使用原有 `config/`、`data/`、`logs/` 持久化目录。修复镜像发布后，需要拉取新镜像并重建容器才能生效。
+
 ### 本地开发
 
 ```bash
@@ -59,6 +68,19 @@ make dev-backend
 
 # 启动前端开发服务器（另一个终端）
 make dev-frontend
+```
+
+### CI 与镜像发布
+
+`CI` 在向 `main/master` 推送或创建、更新 PR 时检查后端、前端及容器启动。`Docker Release` 在推送 `v*` 标签时复用完整 CI，通过后发布 GHCR 镜像；同一标签只有一个发布工作流。
+
+镜像支持 `linux/amd64` 和 `linux/arm64`。正式版本 `vX.Y.Z` 同时提供 `vX.Y.Z`、`X.Y.Z`、`X.Y` 和 `latest` 标签，`latest` 沿用每次匹配标签发布时更新的规则。启动冒烟检查在 amd64 镜像中验证新库迁移、健康接口、前端首页及重启后的数据保留，发布后检查两种架构的镜像清单。
+
+本地可执行同样的镜像检查，需要 Docker 和 Python 3：
+
+```bash
+docker build --platform linux/amd64 -t kuroko:smoke .
+bash scripts/verify/docker-smoke.sh kuroko:smoke
 ```
 
 ## 前置要求

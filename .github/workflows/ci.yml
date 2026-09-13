@@ -1,41 +1,77 @@
-name: 持续集成
+name: CI
 
 on:
   push:
     branches: [main, master]
   pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   backend:
+    name: Backend Checks
     runs-on: ubuntu-latest
+    env:
+      KUROKO_DATABASE_URL: sqlite://
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Check Out Repository
+        uses: actions/checkout@v4
+      - name: Set Up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: 安装后端依赖
+      - name: Install Backend Dependencies
         run: pip install -r backend/requirements.txt
-      - name: Python 编译检查
+      - name: Compile Python Sources
         run: PYTHONPATH=backend python -m compileall -q backend/app backend/alembic
-      - name: 后端测试
+      - name: Run Backend Tests
         run: PYTHONPATH=backend pytest -q backend/tests
 
   frontend:
+    name: Frontend Checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - name: Check Out Repository
+        uses: actions/checkout@v4
+      - name: Set Up pnpm
+        uses: pnpm/action-setup@v4
         with:
           version: 10
-      - uses: actions/setup-node@v4
+      - name: Set Up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
-      - name: 安装前端依赖
+      - name: Install Frontend Dependencies
         run: pnpm --dir frontend install --frozen-lockfile
-      - name: 前端检查
-        run: |
-          pnpm --dir frontend lint
-          pnpm --dir frontend test
-          pnpm --dir frontend build
+      - name: Lint Frontend
+        run: pnpm --dir frontend lint
+      - name: Run Frontend Tests
+        run: pnpm --dir frontend test
+      - name: Build Frontend
+        run: pnpm --dir frontend build
+
+  docker-smoke:
+    name: Container Smoke Test
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check Out Repository
+        uses: actions/checkout@v4
+      - name: Set Up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build Test Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: kuroko:smoke
+          cache-from: type=gha,scope=kuroko-image
+          cache-to: type=gha,mode=max,scope=kuroko-image
+      - name: Verify Container Startup and Restart
+        run: bash scripts/verify/docker-smoke.sh kuroko:smoke

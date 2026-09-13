@@ -32,6 +32,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 拷贝后端工程文件
 COPY backend/app ./app
 COPY backend/pyproject.toml .
+# 启动迁移按 app 的相邻路径定位配置与脚本，必须一并交付。
+COPY backend/alembic.ini .
+COPY backend/alembic ./alembic
 
 # 拷贝前端构建完成的静态文件
 COPY --from=web-builder /app/frontend/dist /app/static
