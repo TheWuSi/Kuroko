@@ -1,4 +1,5 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -40,13 +41,15 @@ def list_codes(
     if search:
         query = query.filter(CodeRecord.code.contains(canonical_code(search), autoescape=True))
     total = query.count()
+    total_codes = query.with_entities(func.count(func.distinct(CodeRecord.code))).scalar()
     rows = (
         query.order_by(CodeRecord.discovered_at.desc(), CodeRecord.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
     return success(
-        {"total": total, "page": page, "page_size": page_size, "items": [serialize_code(row) for row in rows]}
+        {"total": total, "total_codes": total_codes, "page": page, "page_size": page_size,
+         "items": [serialize_code(row) for row in rows]}
     )
 
 
@@ -130,6 +133,24 @@ def scan_status(task_id: str | None = Query(default=None, max_length=64), db: Se
     job = query.filter(ScanJob.task_id == task_id).first() if task_id else query.first()
     if job is None:
         raise HTTPException(status_code=404, detail="扫描任务不存在")
+    return success(serialize_scan_job(job))
+
+
+@router.post("/scan/{task_id}/cancel")
+def cancel_scan(task_id: str = Path(min_length=1, max_length=64), db: Session = Depends(get_db)):
+    job = db.query(ScanJob).filter_by(task_id=task_id).first()
+    if job is None:
+        raise HTTPException(status_code=404, detail="扫描任务不存在")
+    if job.status in {"completed", "failed"}:
+        raise HTTPException(status_code=409, detail="扫描任务已结束")
+    if job.status != "cancelled":
+        db.query(ScanJob).filter(
+            ScanJob.task_id == task_id, ScanJob.status.in_(["pending", "scanning"])
+        ).update({ScanJob.cancel_requested: True}, synchronize_session=False)
+        db.commit()
+        db.refresh(job)
+        if job.status in {"completed", "failed"}:
+            raise HTTPException(status_code=409, detail="扫描任务已结束")
     return success(serialize_scan_job(job))
 
 

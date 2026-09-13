@@ -1,7 +1,11 @@
 import { apiClient } from './client'
-import type { ApiResponse, StorageNodeInfo, StorageGroup, StorageMemberInput, StorageIgnore, DirectoryListing } from '@/types/api'
+import type { ApiResponse, StorageNodeInfo, StorageGroup, StorageMemberInput, StorageIgnore, DirectoryListing, StorageRevision } from '@/types/api'
 
 export const storageService = {
+  async getRevision(signal?: AbortSignal): Promise<StorageRevision> {
+    const res = await apiClient.get<ApiResponse<StorageRevision>>('/storages/revision', { signal })
+    return res.data.data
+  },
   // 获取所有存储节点信息 (包含 OpenList 原生容量与手动推算)
   async getStorages(params?: { refresh?: boolean; include_ignored?: boolean }, signal?: AbortSignal): Promise<StorageNodeInfo[]> {
     const res = await apiClient.get<ApiResponse<{ storages: StorageNodeInfo[] }>>('/storages', { params, signal })
@@ -61,6 +65,11 @@ export const storageService = {
     const response = await apiClient.put<ApiResponse<StorageNodeInfo>>(`/storages/${storageId}/space`, {
       total_space_bytes: totalSpaceBytes,
     })
+    return response.data.data
+  },
+
+  async resetStorageSpace(storageId: number): Promise<StorageNodeInfo> {
+    const response = await apiClient.delete<ApiResponse<StorageNodeInfo>>(`/storages/${storageId}/space`)
     return response.data.data
   },
 }

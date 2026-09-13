@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, Text, func
+from sqlalchemy import JSON, DateTime, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -25,6 +25,11 @@ class ScanJob(Base):
     scanned_files: Mapped[int] = mapped_column(default=0)
     new_codes_found: Mapped[int] = mapped_column(default=0)
     duplicates_found: Mapped[int] = mapped_column(default=0, server_default="0")
+    scan_paths: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
+    cancel_requested: Mapped[bool] = mapped_column(default=False, server_default="0")
+    scanned_dirs: Mapped[int] = mapped_column(default=0, server_default="0")
+    total_roots: Mapped[int] = mapped_column(default=0, server_default="0")
+    completed_roots: Mapped[int] = mapped_column(default=0, server_default="0")
     current_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     progress_percent: Mapped[float] = mapped_column(default=0.0)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

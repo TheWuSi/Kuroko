@@ -13,3 +13,7 @@ export function summarizeStorage(nodes: StorageNodeInfo[]) {
 export function variantLabel(variant: string) {
   return variant === 'original' ? '原版' : `-${variant}`
 }
+
+export function partLabel(part: number | null | undefined) {
+  return part == null ? '' : part === 0 ? '基础分集' : `分集 ${part}`
+}

@@ -33,18 +33,28 @@ def is_ignored_path(db: Session, path: str, remote: list[dict[str, Any]] | None 
     return any(is_within(path, row.storage_mount) for row in ignored)
 
 
-def group_roots(db: Session, group: StorageGroup) -> list[str]:
-    roots = [
-        join_path(member.storage_mount, folder)
+def group_directories(db: Session, group: StorageGroup) -> list[dict]:
+    directories = [
+        {"storage_id": member.storage_id, "storage_mount": member.storage_mount,
+         "kind": kind, "path": join_path(member.storage_mount, folder)}
         for member in group.paths
-        for folder in [member.folder_path, *(member.archive_folders or [])]
+        for kind, folder in [("download", member.folder_path),
+                             *[("archive", folder) for folder in (member.archive_folders or [])]]
     ]
     # 未能自动归入旧成员的探测配置仍参与原分组扫描，编辑分组后由新目录配置接管。
     for probe in get_config(db, masked=False).get("probe_paths", []):
         if probe.get("group_name") == group.name:
-            roots.extend(join_path(path["storage_mount"], path["folder"]) for path in probe.get("paths", []))
+            directories.extend(
+                {"storage_id": None, "storage_mount": path["storage_mount"], "kind": "probe",
+                 "path": join_path(path["storage_mount"], path["folder"])}
+                for path in probe.get("paths", [])
+            )
     hidden = ignored_mounts(db)
-    return list(dict.fromkeys(root for root in roots if not any(is_within(root, mount) for mount in hidden)))
+    return [item for item in directories if not any(is_within(item["path"], mount) for mount in hidden)]
+
+
+def group_roots(db: Session, group: StorageGroup) -> list[str]:
+    return list(dict.fromkeys(item["path"] for item in group_directories(db, group)))
 
 
 def resolve_storage_path(path: str, storages: list[dict[str, Any]]) -> tuple[dict[str, Any], str]:
@@ -264,8 +274,8 @@ def choose_target(
         if free is not None:
             free = max(0, free - reserved.get(info["mount_path"], 0))
             if free >= required_size:
-                candidates.append((free, target))
+                candidates.append((-(path.priority or 0), free, target))
     if not candidates:
         raise ValueError("分组内没有容量已知、状态正常且空间足够的存储")
-    free, target = min(candidates)
+    _, free, target = min(candidates)
     return target, free

@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import time
+from collections.abc import Callable
 from typing import Any, Literal
 
 import httpx
@@ -159,11 +160,14 @@ class OpenListClient:
         body: dict[str, Any] | None = None,
         *,
         deadline: float | None = None,
+        before_page: Callable[[], None] | None = None,
     ) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         seen: set[str | int] = set()
         expected_total = None
         for page in range(1, self.MAX_PAGES + 1):
+            if before_page is not None:
+                before_page()
             pagination = {"page": page, "per_page": self.PAGE_SIZE}
             kwargs = {"json": {**body, **pagination}} if body is not None else {"params": pagination}
             if deadline is not None:
@@ -206,21 +210,28 @@ class OpenListClient:
         *,
         deadline: float | None = None,
         refresh: bool = False,
+        before_page: Callable[[], None] | None = None,
     ) -> list[dict[str, Any]]:
         path = normalize_path(path)
+        if before_page is not None:
+            # 长扫描有自己的取消检查，不能与普通目录浏览共享正在执行的请求。
+            return self._list_files(path, deadline=deadline, refresh=refresh, before_page=before_page)
         return self.cached(
             ("directory", path),
             lambda: self._list_files(path, deadline=deadline, refresh=refresh),
             refresh=refresh,
         )
 
-    def _list_files(self, path: str, *, deadline: float | None, refresh: bool) -> list[dict[str, Any]]:
+    def _list_files(
+        self, path: str, *, deadline: float | None, refresh: bool, before_page: Callable[[], None] | None = None
+    ) -> list[dict[str, Any]]:
         path = normalize_path(path)
         entries = self._pages(
             "POST",
             "/api/fs/list",
             {"path": path, "password": "", "refresh": refresh},
             deadline=deadline,
+            before_page=before_page,
         )
         for entry in entries:
             try:

@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { codeService } from '@/services/code.service'
-import { variantLabel } from '@/lib/storage'
+import { partLabel, variantLabel } from '@/lib/storage'
 import { toast } from '@/stores/uiStore'
 import type { DuplicateAllowance, DuplicateGroup } from '@/types/api'
 
@@ -15,7 +15,8 @@ export function DuplicateReview({ groupId, refreshVersion }: { groupId?: number;
   const [rules, setRules] = useState<DuplicateAllowance[]>([])
   const [page, setPage] = useState(1)
   const [version, setVersion] = useState(0)
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<Set<string>>(new Set())
+  const finish = (key: string) => setBusy((previous) => { const next = new Set(previous); next.delete(key); return next })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -39,29 +40,33 @@ export function DuplicateReview({ groupId, refreshVersion }: { groupId?: number;
   }, [groupId, refreshVersion, version, page])
 
   const allow = async (item: DuplicateGroup) => {
-    setBusy(true)
+    const key = 'allow:' + item.group_id + ':' + item.code
+    if (busy.has(key)) return
+    setBusy((previous) => new Set([...previous, key]))
     try {
       await codeService.allowDuplicate(item.group_id, item.code, [...new Set([...item.allowed_variants, ...item.variants])])
-      toast.success('版本组合已记住，同版本再次重复仍会提示')
+      toast.success('版本组合已保存，相同版本或分集的重复副本仍会提示')
       setVersion((value) => value + 1)
     } catch (error) { toast.error(error instanceof Error ? error.message : '保存放行规则失败') }
-    finally { setBusy(false) }
+    finally { finish(key) }
   }
 
   const revoke = async (id: number) => {
-    setBusy(true)
+    const key = 'rule:' + id
+    if (busy.has(key)) return
+    setBusy((previous) => new Set([...previous, key]))
     try {
       await codeService.revokeDuplicate(id)
       toast.success('已撤销版本组合放行')
       setVersion((value) => value + 1)
     } catch (error) { toast.error(error instanceof Error ? error.message : '撤销规则失败') }
-    finally { setBusy(false) }
+    finally { finish(key) }
   }
 
   return <Card>
     <CardHeader className="pb-3">
       <CardTitle className="flex items-center gap-2 text-base"><Copy className="h-4 w-4 text-primary" />分组内跨盘查重</CardTitle>
-      <p className="text-xs text-muted-foreground">按下载与归档目录比对。FC2 与 FC2-PPV 合并识别；放行规则随分组和番号保存，移动文件后仍有效。</p>
+      <p className="text-xs text-muted-foreground">核对组内下载与归档目录。FC2 别名统一识别，不同分集可自然共存；版本放行规则随分组和番号保存。</p>
     </CardHeader>
     <CardContent>
       <Tabs defaultValue="duplicates" className="space-y-4">
@@ -73,21 +78,45 @@ export function DuplicateReview({ groupId, refreshVersion }: { groupId?: number;
         {loading && <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />核对索引中…</p>}
         <TabsContent value="duplicates" className="space-y-3">
           {!loading && !error && !total && <p className="text-sm text-muted-foreground">当前索引中没有待处理的组内重复。扫描目录后会自动更新。</p>}
-          {duplicates.map((item) => <div key={item.group_id + ':' + item.code} className="space-y-3 rounded-lg border p-3 sm:p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono font-semibold">{item.code}</span><Badge variant="outline">{item.group_name}</Badge>
-              <Badge variant="warning">{item.files.length} 份文件</Badge>
+          {duplicates.map((item) => {
+            const key = item.group_id + ':' + item.code
+            const saving = busy.has('allow:' + key)
+            return <div key={key} className="space-y-3 rounded-lg border p-3 sm:p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <span className="break-all font-mono font-semibold">{item.code}</span>
+                  <Badge variant="outline">{item.group_name}</Badge>
+                  <Badge variant="warning">{item.files.length} 份文件</Badge>
+                </div>
+                <Button variant="outline" className="min-h-[44px] shrink-0 gap-2 self-end"
+                  disabled={!item.can_ignore || saving || loading}
+                  aria-label={'允许 ' + item.code + ' 的版本共存'}
+                  onClick={() => void allow(item)}>
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                  允许这些版本共存
+                </Button>
+              </div>
+              <ul className="space-y-2">
+                {item.files.map((file) => <li key={file.id} className="space-y-1.5 rounded-md bg-muted/40 p-3 text-xs">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="secondary" className="font-mono">{variantLabel(file.variant)}</Badge>
+                    {file.part_number !== null && <Badge variant="outline" className="font-mono">{partLabel(file.part_number)}</Badge>}
+                    {file.directory_matches.map((match) => <Badge key={match.kind + match.path} variant="outline">
+                      {match.kind === 'download' ? '下载目录' : match.kind === 'archive' ? '归档目录' : '历史探测目录'}
+                    </Badge>)}
+                    {file.directory_matches[0] && <span className="break-all font-mono text-muted-foreground">节点 {file.directory_matches[0].storage_mount}</span>}
+                  </div>
+                  {[...new Set(file.directory_matches.map((match) => match.path))].map((path) =>
+                    <p key={path} className="break-all text-muted-foreground">配置目录：<span className="font-mono">{path}</span></p>)}
+                  <p className="break-all font-mono">{file.storage_path.replace(/\/$/, '')}/{file.file_name}</p>
+                </li>)}
+              </ul>
+              {!item.can_ignore && <p className="text-xs text-amber-700 dark:text-amber-400">
+                {item.code.startsWith('FC2-') ? '存在同版本、同一分集的重复文件。' : '存在同一版本的多份文件。'}
+                版本共存不能放行这些重复副本。
+              </p>}
             </div>
-            <ul className="space-y-2">
-              {item.files.map((file) => <li key={file.id} className="flex items-start gap-2 text-xs">
-                <Badge variant="secondary" className="shrink-0 font-mono">{variantLabel(file.variant)}</Badge>
-                <span className="min-w-0 break-all font-mono text-muted-foreground">{file.storage_path}/{file.file_name}</span>
-              </li>)}
-            </ul>
-            {item.can_ignore ? <Button variant="outline" className="min-h-[44px] gap-2" disabled={busy || loading} onClick={() => void allow(item)}>
-              <Check className="h-4 w-4" />允许这些版本共存
-            </Button> : <p className="text-xs text-amber-700 dark:text-amber-400">存在同一版本的多份文件，请检查重复文件。版本放行规则不会屏蔽同版本重复。</p>}
-          </div>)}
+          })}
           {total > 30 && <div className="flex items-center justify-center gap-3">
             <Button variant="outline" disabled={page <= 1 || loading} className="min-h-[44px]" onClick={() => setPage((value) => value - 1)}>上一页</Button>
             <span className="font-mono text-xs">{page} / {Math.ceil(total / 30)}</span>
@@ -98,9 +127,9 @@ export function DuplicateReview({ groupId, refreshVersion }: { groupId?: number;
           {!loading && !error && !rules.length && <p className="text-sm text-muted-foreground">尚未允许任何重复组合。</p>}
           {rules.map((rule) => <div key={rule.id} className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="space-y-1"><p className="font-mono text-sm font-semibold">{rule.code}</p>
-              <p className="text-xs text-muted-foreground">{rule.group_name} · {rule.variants.map(variantLabel).join('、')} 各一份</p>
+              <p className="text-xs text-muted-foreground">{rule.group_name} · {rule.variants.map(variantLabel).join('、')} · {rule.code.startsWith('FC2-') ? '每个版本的各分集一份' : '各一份'}</p>
             </div>
-            <Button variant="outline" disabled={busy || loading} className="min-h-[44px] shrink-0 gap-2" onClick={() => void revoke(rule.id)}><Undo2 className="h-4 w-4" />撤销允许</Button>
+            <Button variant="outline" disabled={busy.has('rule:' + rule.id) || loading} className="min-h-[44px] shrink-0 gap-2" onClick={() => void revoke(rule.id)}><Undo2 className="h-4 w-4" />撤销允许</Button>
           </div>)}
         </TabsContent>
       </Tabs>

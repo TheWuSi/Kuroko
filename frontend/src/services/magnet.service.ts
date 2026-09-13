@@ -47,7 +47,7 @@ export const magnetService = {
   },
 
   async checkDuplicates(
-    items: Array<{ code: string; variant: CodeVariant }>, scope: TargetScope, signal?: AbortSignal,
+    items: Array<{ code: string; variant: CodeVariant; part_numbers: number[] | null }>, scope: TargetScope, signal?: AbortSignal,
   ): Promise<DuplicateDecision[]> {
     const res = await apiClient.post<ApiResponse<{ items: DuplicateDecision[] }>>('/magnets/check-duplicates', {
       items, ...scope,

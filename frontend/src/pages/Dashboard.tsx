@@ -23,30 +23,31 @@ import {
 } from 'lucide-react'
 import { taskService } from '@/services/task.service'
 import { codeService } from '@/services/code.service'
-import { storageService } from '@/services/storage.service'
+import { storageCache, useStorageStore } from '@/stores/storageStore'
+import { useScanStore } from '@/stores/scanStore'
 import { formatBytes, formatSpeed } from '@/lib/format'
 import { summarizeStorage } from '@/lib/storage'
-import type { DownloadTask, StorageNodeInfo } from '@/types/api'
+import type { DownloadTask } from '@/types/api'
 
 export function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [activeTasks, setActiveTasks] = useState<DownloadTask[]>([])
   const [totalCodes, setTotalCodes] = useState<number>(0)
-  const [storages, setStorages] = useState<StorageNodeInfo[]>([])
+  const storages = useStorageStore((state) => state.storages)
+  const libraryRevision = useScanStore((state) => state.libraryRevision)
   const [activeTab, setActiveTab] = useState('all')
 
   const loadData = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true)
     try {
-      const [tasksRes, codesRes, storagesRes] = await Promise.all([
+      const [tasksRes, codesRes] = await Promise.all([
         taskService.getTasks({ page: 1, page_size: 20 }),
         codeService.getCodes({ page: 1, page_size: 1 }),
-        storageService.getStorages({ refresh: isRefresh }).catch(() => []),
+        storageCache.refresh(isRefresh),
       ])
       setActiveTasks(tasksRes.items || [])
-      setTotalCodes(codesRes.total || 0)
-      setStorages(storagesRes || [])
+      setTotalCodes(codesRes.total_codes || 0)
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -55,7 +56,7 @@ export function Dashboard() {
 
   useEffect(() => {
     loadData()
-  }, [])
+  }, [libraryRevision])
 
   // 计算存储统计
   const storageSummary = summarizeStorage(storages)

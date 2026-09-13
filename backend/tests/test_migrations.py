@@ -25,7 +25,10 @@ def test_fresh_database_is_migrated_and_startup_is_idempotent(tmp_path, monkeypa
     database.init_db()
     database.init_db()
     with engine.connect() as connection:
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0002_library_scopes"
+        assert (
+            connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+            == "0003_storage_jobs_parts"
+        )
         assert {"storage_ignores", "duplicate_allowances"}.issubset(inspect(connection).get_table_names())
         assert "archive_folders" in {
             column["name"] for column in inspect(connection).get_columns("storage_group_paths")

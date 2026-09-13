@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { User } from '@/types/api'
 import { authService } from '@/services/auth.service'
 import { getStoredToken, removeStoredToken } from '@/services/client'
+import { storageCache } from '@/stores/storageStore'
 
 interface AuthState {
   token: string | null
@@ -45,6 +46,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       // 4. 验证 Token 有效性并拉取当前用户信息
       try {
         const user = await authService.getCurrentUser()
+        storageCache.initialize(user.id)
         set({ token: storedToken, user, loading: false })
         return true
       } catch {
@@ -61,12 +63,15 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   setInitialized: (val: boolean) => set({ initialized: val }),
 
-  setUser: (user) => set({ user }),
+  setUser: (user) => {
+    storageCache.initialize(user?.id ?? null)
+    set({ user })
+  },
 
   logout: () => {
     authService.logout()
+    storageCache.clear()
     set({ token: null, user: null })
   },
 }))
-
 

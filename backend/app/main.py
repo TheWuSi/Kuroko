@@ -15,15 +15,16 @@ from app.core.database import SessionLocal, ensure_runtime_dirs, init_db
 from app.core.responses import ApiError
 from app.core.spa import mount_spa
 from app.services.code_service import recover_orphaned_scans
-from app.services.download_service import sync_tasks
+from app.services.download_service import sync_tasks, sync_transfer_revision
 
 
 def _sync_in_worker() -> None:
-    try:
-        with SessionLocal() as db:
-            sync_tasks(db)
-    except Exception as exc:
-        logging.getLogger(__name__).warning("OpenList 任务同步未完成：%s", type(exc).__name__)
+    for sync in (sync_tasks, sync_transfer_revision):
+        try:
+            with SessionLocal() as db:
+                sync(db)
+        except Exception as exc:
+            logging.getLogger(__name__).warning("OpenList 任务同步未完成：%s", type(exc).__name__)
 
 
 async def _task_poller() -> None:

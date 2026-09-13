@@ -7,6 +7,7 @@ from app.core.security import get_current_user
 from app.models.task import DownloadTask, TaskStatus
 from app.services.download_service import apply_remote_task, normalize_task, sync_tasks
 from app.services.openlist_client import OpenListError
+from app.services.storage_events import storage_events
 from app.services.storage_service import get_client
 
 router = APIRouter(prefix="/tasks", tags=["Tasks"], dependencies=[Depends(get_current_user)])
@@ -17,6 +18,8 @@ def task_data(task: DownloadTask) -> dict:
         "task_id": task.task_id,
         "openlist_task_id": task.openlist_task_id,
         "code": task.code,
+        "variant": task.variant,
+        "part_numbers": task.part_numbers,
         "magnet": task.magnet,
         "status": task.status,
         "progress": task.progress,
@@ -65,6 +68,7 @@ def sync(db: Session = Depends(get_db)):
 @router.get("/transfers")
 def list_transfers(db: Session = Depends(get_db)):
     try:
+        source_id = storage_events.current()["source_id"]
         with get_client(db) as client:
             tasks = client.get_offline_tasks(kind="offline_download_transfer")
         items = [
@@ -79,6 +83,7 @@ def list_transfers(db: Session = Depends(get_db)):
             }
             for item in tasks
         ]
+        storage_events.observe_transfers(tasks, source_id)
         return success({"items": items})
     except OpenListError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -128,6 +133,7 @@ def cancel_task(
             apply_remote_task(task, client.get_task(task.openlist_task_id))
             if task.status in {TaskStatus.completed.value, TaskStatus.failed.value, TaskStatus.cancelled.value}:
                 db.commit()
+                storage_events.invalidate()
                 raise ApiError(409, 40901, "OpenList 离线任务已结束")
             client.cancel_task(task.openlist_task_id)
         task.error_message = "取消请求已提交，等待 OpenList 确认"

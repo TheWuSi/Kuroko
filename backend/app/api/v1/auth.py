@@ -1,5 +1,3 @@
-from datetime import UTC, datetime
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -36,7 +34,15 @@ def login(payload: Credentials, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
     token, expires = create_token(user)
     refresh, refresh_expires = create_token(user, refresh=True)
-    return success({"token": token, "refresh_token": refresh, "token_type": "Bearer", "expires_at": expires.isoformat(), "refresh_expires_at": refresh_expires.isoformat()})
+    return success(
+        {
+            "token": token,
+            "refresh_token": refresh,
+            "token_type": "Bearer",
+            "expires_at": expires.isoformat(),
+            "refresh_expires_at": refresh_expires.isoformat(),
+        }
+    )
 
 
 @router.post("/refresh")

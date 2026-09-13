@@ -74,6 +74,7 @@ export interface MagnetParseItem extends DuplicateDecision {
   dn_code: string | null
   verified_code: string | null
   variant: CodeVariant
+  part_numbers: number[] | null
   total_files_count: number
   total_size: number
   info_hash: string
@@ -136,6 +137,8 @@ export type TaskStatusType = 'pending' | 'downloading' | 'completed' | 'failed' 
 export interface DownloadTask {
   task_id: string
   code: string
+  variant: CodeVariant
+  part_numbers: number[] | null
   magnet: string
   status: TaskStatusType
   progress: number
@@ -181,6 +184,7 @@ export interface CodeRecord {
   id: number
   code: string
   variant: CodeVariant
+  part_number: number | null
   storage_path: string
   file_name: string
   file_size: number
@@ -190,6 +194,7 @@ export interface CodeRecord {
 
 export interface CodeListResponse {
   total: number
+  total_codes: number
   page: number
   page_size: number
   items: CodeRecord[]
@@ -197,8 +202,14 @@ export interface CodeListResponse {
 
 export interface ScanJobStatus {
   task_id: string
+  group_id: number | null
   status: 'pending' | 'scanning' | 'completed' | 'failed' | 'cancelled'
   scanned_files: number
+  scanned_dirs: number
+  total_roots: number
+  completed_roots: number
+  scan_paths: string[]
+  cancel_requested: boolean
   new_codes_found: number
   duplicates_found: number
   current_path: string | null
@@ -228,6 +239,7 @@ export interface StorageMemberInput {
   storage_id: number
   download_path: string
   archive_paths: string[]
+  priority: number
 }
 
 export interface StorageMember extends Omit<StorageMemberInput, 'storage_id'> {
@@ -251,6 +263,7 @@ export interface StorageGroupPath {
   id: number
   storage_mount: string
   folder_path: string
+  priority: number
 }
 
 export interface StorageGroup {
@@ -271,7 +284,19 @@ export interface DuplicateGroup {
   ignored: boolean
   can_ignore: boolean
   reason: 'same_version' | 'version_combination'
-  files: CodeRecord[]
+  files: Array<CodeRecord & { directory_matches: DirectoryMatch[] }>
+}
+
+export interface DirectoryMatch {
+  storage_id: number | null
+  storage_mount: string
+  kind: 'download' | 'archive' | 'probe'
+  path: string
+}
+
+export interface StorageRevision {
+  source_id: string
+  revision: number
 }
 
 export interface DuplicateAllowance {

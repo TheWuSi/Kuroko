@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router'
 import { DuplicateReview } from '@/components/common/DuplicateReview'
+import { ScanProgress } from '@/components/common/ScanProgress'
 import { PageHeader } from '@/components/common/PageHeader'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import {
@@ -44,17 +44,20 @@ import {
   Check,
   Loader2,
   MoreVertical,
+  RefreshCw,
 } from 'lucide-react'
 import { codeService } from '@/services/code.service'
-import { storageService } from '@/services/storage.service'
+import { useStorageStore } from '@/stores/storageStore'
+import { isScanActive, startTrackedScan, useScanStore } from '@/stores/scanStore'
 import { formatBytes } from '@/lib/format'
-import { variantLabel } from '@/lib/storage'
+import { partLabel, variantLabel } from '@/lib/storage'
 import { toast } from '@/stores/uiStore'
-import type { CodeRecord, ScanJobStatus, StorageGroup } from '@/types/api'
+import type { CodeRecord } from '@/types/api'
 
 export function Codes() {
   const [codes, setCodes] = useState<CodeRecord[]>([])
   const [total, setTotal] = useState(0)
+  const [totalCodes, setTotalCodes] = useState(0)
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -63,12 +66,11 @@ export function Codes() {
   const [refreshVersion, setRefreshVersion] = useState(0)
 
   // 扫描控制抽屉
-  const [scanOpen, setScanOpen] = useState(false)
-  const [scanning, setScanning] = useState(false)
-  const [scanStatus, setScanStatus] = useState<ScanJobStatus | null>(null)
-  const [groups, setGroups] = useState<StorageGroup[]>([])
+  const { job: scanStatus, starting, libraryRevision, panelOpen: scanOpen } = useScanStore()
+  const setScanOpen = (panelOpen: boolean) => useScanStore.setState({ panelOpen })
+  const scanning = starting || isScanActive(scanStatus)
+  const groups = useStorageStore((state) => state.groups)
   const [selectedScanGroup, setSelectedScanGroup] = useState<number | undefined>(undefined)
-  const [scanTaskId, setScanTaskId] = useState<string | null>(null)
   const [scanPaths, setScanPaths] = useState<string[]>([])
   const [pathsLoading, setPathsLoading] = useState(false)
   const [pathsError, setPathsError] = useState('')
@@ -94,8 +96,11 @@ export function Codes() {
         page,
         page_size: 24,
       }, signal)
+      if (signal?.aborted) return
       setCodes(res.items || [])
       setTotal(res.total || 0)
+      setTotalCodes(res.total_codes || 0)
+      if (page > 1 && !res.items.length) setPage(Math.max(1, Math.ceil(res.total / 24)))
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '获取番号列表失败'
       if (!signal?.aborted) toast.error(msg)
@@ -108,17 +113,16 @@ export function Codes() {
     const controller = new AbortController()
     void fetchCodes(controller.signal)
     return () => controller.abort()
-  }, [fetchCodes])
-
-  // 加载存储分组供扫描选择
-  useEffect(() => {
-    const controller = new AbortController()
-    storageService.getGroups(controller.signal).then((res) => setGroups(res || [])).catch(() => {})
-    return () => controller.abort()
-  }, [])
+  }, [fetchCodes, libraryRevision, refreshVersion])
 
   useEffect(() => {
     if (!scanOpen) return
+    if (isScanActive(scanStatus)) {
+      setScanPaths(scanStatus?.scan_paths ?? [])
+      setPathsLoading(false)
+      setPathsError('')
+      return
+    }
     const controller = new AbortController()
     setPathsLoading(true)
     setPathsError('')
@@ -127,55 +131,19 @@ export function Codes() {
       if (!controller.signal.aborted) setPathsError(error instanceof Error ? error.message : '获取扫描范围失败')
     }).finally(() => { if (!controller.signal.aborted) setPathsLoading(false) })
     return () => controller.abort()
-  }, [scanOpen, selectedScanGroup])
+  }, [scanOpen, selectedScanGroup, scanStatus?.task_id, scanStatus?.status, scanStatus?.scan_paths, groups])
 
   // 触发定向扫描
   const handleStartScan = async () => {
-    if (!scanPaths.length || pathsLoading) return
-    setScanning(true)
+    if (!scanPaths.length || pathsLoading || scanning) return
     try {
-      const res = await codeService.startScan(selectedScanGroup)
+      await startTrackedScan(selectedScanGroup, scanPaths)
       toast.success('定向探测扫描已启动')
-      setScanTaskId(res.task_id)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '启动扫描失败'
       toast.error(msg)
-      setScanning(false)
     }
   }
-
-  // 轮询扫描状态
-  useEffect(() => {
-    if (!scanTaskId) return
-    const controller = new AbortController()
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const poll = async () => {
-      try {
-        const s = await codeService.getScanStatus(scanTaskId, controller.signal)
-        setScanStatus(s)
-        if (s.status === 'completed' || s.status === 'failed' || s.status === 'cancelled') {
-          setScanTaskId(null)
-          setScanning(false)
-          void fetchCodes()
-          setRefreshVersion((value) => value + 1)
-          if (s.status === 'completed') {
-            if (s.duplicates_found) toast.warning(`扫描完成，发现 ${s.duplicates_found} 组待处理重复`)
-            else toast.success(`扫描完成，新收录 ${s.new_codes_found} 条媒体记录`)
-          }
-          return
-        }
-        timer = setTimeout(poll, 2000)
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          setScanning(false)
-          setScanTaskId(null)
-          toast.error(error instanceof Error ? error.message : '读取扫描状态失败')
-        }
-      }
-    }
-    void poll()
-    return () => { controller.abort(); if (timer) clearTimeout(timer) }
-  }, [scanTaskId, fetchCodes])
 
   // 确认删除番号
   const confirmDeleteCode = async () => {
@@ -183,7 +151,6 @@ export function Codes() {
     try {
       await codeService.deleteCode(deletingCode, selectedGroup)
       toast.success(`番号 ${deletingCode} 已从归档中移除`)
-      fetchCodes()
       setRefreshVersion((value) => value + 1)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '删除失败'
@@ -204,23 +171,33 @@ export function Codes() {
     <div className="space-y-6">
       <PageHeader
         title="番号媒体库归档"
-        description={`当前范围收录 ${total} 条媒体记录，通过扫描下载与归档目录确认实际文件`}
+        description="扫描下载与归档目录确认实际文件，统计随分组和搜索条件更新"
       >
+        <Button variant="outline" className="min-h-[44px] gap-2" disabled={loading} onClick={() => setRefreshVersion((value) => value + 1)}>
+          <RefreshCw className={loading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />刷新
+        </Button>
         <Button
           onClick={() => {
             setScanOpen(true)
             setSelectedScanGroup(selectedGroup)
-            codeService.getScanStatus().then((s) => {
-              setScanStatus(s)
-              if (s.status === 'pending' || s.status === 'scanning') { setScanning(true); setScanTaskId(s.task_id) }
-            }).catch(() => {})
           }}
           className="gap-2 bg-blue-600 hover:bg-blue-700 min-h-[44px] sm:min-h-[36px]"
         >
           <Radar className="h-4 w-4" />
-          定向探测扫描
+          {scanning ? '查看扫描进度' : '定向探测扫描'}
         </Button>
       </PageHeader>
+
+      <div className="grid grid-cols-2 gap-3" aria-live="polite">
+        <Card><CardContent className="p-4">
+          <p className="text-xs text-muted-foreground">番号总数</p>
+          <p className="mt-1 font-mono text-2xl font-semibold">{totalCodes.toLocaleString()} <span className="text-sm font-normal text-muted-foreground">个</span></p>
+        </CardContent></Card>
+        <Card><CardContent className="p-4">
+          <p className="text-xs text-muted-foreground">媒体文件总数</p>
+          <p className="mt-1 font-mono text-2xl font-semibold">{total.toLocaleString()} <span className="text-sm font-normal text-muted-foreground">个</span></p>
+        </CardContent></Card>
+      </div>
 
       {/* 搜索与过滤工具栏 */}
       <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
@@ -246,11 +223,11 @@ export function Codes() {
         </div>
       </div>
 
-      <DuplicateReview groupId={selectedGroup} refreshVersion={refreshVersion} />
+      <DuplicateReview groupId={selectedGroup} refreshVersion={refreshVersion + libraryRevision} />
 
       {/* 骨架屏加载状态 */}
       {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
           {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
             <Card key={i} className="p-4 space-y-3 border-slate-200/80">
               <div className="flex justify-between items-center">
@@ -272,7 +249,7 @@ export function Codes() {
           description={search ? '没有匹配该关键词的番号' : '暂无收录数据，可点击右上角启动定向扫描'}
         />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
           {codes.map((item) => (
             <Card
               key={`${item.code}-${item.storage_path}-${item.file_name}`}
@@ -290,7 +267,7 @@ export function Codes() {
                         <button
                           type="button"
                           onClick={() => handleCopy(item.code, item.code, '番号')}
-                          className="p-1.5 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 cursor-pointer"
+                          className="min-h-[44px] min-w-[44px] p-2 text-muted-foreground hover:text-foreground rounded-md hover:bg-muted cursor-pointer"
                         >
                           {copiedCode === item.code ? (
                             <Check className="h-3.5 w-3.5 text-emerald-600" />
@@ -306,7 +283,7 @@ export function Codes() {
                       <DropdownMenuTrigger asChild>
                         <button
                           type="button"
-                          className="p-1.5 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 cursor-pointer"
+                          className="min-h-[44px] min-w-[44px] p-2 text-muted-foreground hover:text-foreground rounded-md hover:bg-muted cursor-pointer"
                         >
                           <MoreVertical className="h-3.5 w-3.5" />
                         </button>
@@ -364,9 +341,10 @@ export function Codes() {
                     </TooltipContent>
                   </Tooltip>
 
-                  <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-[11px]">
+                  <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border text-[11px]">
                     <span>{formatBytes(item.file_size)}</span>
                     <Badge variant="outline" className="font-mono">{variantLabel(item.variant)}</Badge>
+                    {item.part_number !== null && <Badge variant="secondary" className="font-mono">{partLabel(item.part_number)}</Badge>}
                     <Badge variant="secondary" className="text-[10px] px-1.5">
                       {item.source === 'download' ? '离线入库' : '定向扫描'}
                     </Badge>
@@ -414,17 +392,18 @@ export function Codes() {
               <SheetTitle>定向探测扫描</SheetTitle>
             </div>
             <SheetDescription>
-              扫描分组成员的下载目录和媒体库归档目录，建立文件索引并检查跨盘重复。
+              扫描分组成员的下载与归档目录。任务可长时间在后台运行，刷新页面后继续跟踪。
             </SheetDescription>
           </SheetHeader>
 
           <div className="mt-6 space-y-6">
+            {isScanActive(scanStatus) && <ScanProgress />}
             <div className="space-y-2">
               <label className="text-xs font-semibold text-slate-700 block">
                 指定扫描分组 (可选)
               </label>
               <select
-                value={selectedScanGroup || ''}
+                value={(isScanActive(scanStatus) ? scanStatus?.group_id : selectedScanGroup) ?? ''}
                 onChange={(e) =>
                   setSelectedScanGroup(e.target.value ? Number(e.target.value) : undefined)
                 }
@@ -454,7 +433,7 @@ export function Codes() {
               <p className="text-xs text-muted-foreground">忽略节点自动跳过。扫描只更新索引，文件继续按你的目录规则存放。</p>
             </div>
 
-            <Button
+            {!isScanActive(scanStatus) && <Button
               onClick={handleStartScan}
               disabled={scanning || pathsLoading || !scanPaths.length || Boolean(pathsError)}
               className="w-full min-h-[44px] text-base font-semibold gap-2"
@@ -470,70 +449,9 @@ export function Codes() {
                   立即启动定向探测
                 </>
               )}
-            </Button>
+            </Button>}
 
-            {/* 扫描状态展示卡片 */}
-            {scanStatus && (
-              <Card className="border-slate-200 bg-slate-50/50">
-                <CardContent className="p-4 space-y-3 font-mono text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-slate-700">扫描状态:</span>
-                    <Badge
-                      variant={
-                        scanStatus.status === 'completed'
-                          ? 'success'
-                          : scanStatus.status === 'scanning' || scanStatus.status === 'pending'
-                          ? 'info'
-                          : 'destructive'
-                      }
-                    >
-                      {scanStatus.status === 'completed'
-                        ? '已完成'
-                        : scanStatus.status === 'scanning' || scanStatus.status === 'pending'
-                        ? '进行中'
-                        : '已终止'}
-                    </Badge>
-                  </div>
-
-                  {scanStatus.status === 'completed' && <p className="text-xs text-muted-foreground">待处理重复：{scanStatus.duplicates_found} 组，可在媒体库的跨盘查重面板中处理。</p>}
-
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-slate-500">
-                      <span>进度</span>
-                      <span>{scanStatus.progress_percent}%</span>
-                    </div>
-                    <Progress value={scanStatus.progress_percent} />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200/60">
-                    <div>
-                      <span className="text-slate-400 block text-[10px]">已扫文件</span>
-                      <span className="text-base font-bold text-slate-800">
-                        {scanStatus.scanned_files}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block text-[10px]">新收录番号</span>
-                      <span className="text-base font-bold text-emerald-600">
-                        {scanStatus.new_codes_found}
-                      </span>
-                    </div>
-                  </div>
-
-                  {scanStatus.current_path && (
-                    <div className="text-[11px] text-slate-500 truncate" title={scanStatus.current_path}>
-                      📍 当前: {scanStatus.current_path}
-                    </div>
-                  )}
-
-                  {scanStatus.error_message && (
-                    <div className="text-[11px] text-rose-600 bg-rose-50 p-2 rounded">
-                      ⚠️ {scanStatus.error_message}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
+            {!isScanActive(scanStatus) && <ScanProgress />}
           </div>
         </SheetContent>
       </Sheet>

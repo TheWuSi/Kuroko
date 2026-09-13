@@ -1,10 +1,10 @@
 """JWT 和密码校验。"""
 
-from datetime import UTC, datetime, timedelta
 import base64
 import hashlib
 import hmac
 import os
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import Depends, HTTPException, status
@@ -23,10 +23,9 @@ bearer = HTTPBearer(auto_error=False)
 def hash_password(password: str) -> str:
     salt = os.urandom(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 240_000)
-    return "pbkdf2_sha256$240000$%s$%s" % (
-        base64.urlsafe_b64encode(salt).decode(),
-        base64.urlsafe_b64encode(digest).decode(),
-    )
+    salt_text = base64.urlsafe_b64encode(salt).decode()
+    digest_text = base64.urlsafe_b64encode(digest).decode()
+    return f"pbkdf2_sha256$240000${salt_text}${digest_text}"
 
 
 def verify_password(password: str, encoded: str) -> bool:
@@ -45,8 +44,15 @@ def verify_password(password: str, encoded: str) -> bool:
 def create_token(user: User, *, refresh: bool = False) -> tuple[str, datetime]:
     settings = get_settings()
     now = datetime.now(UTC)
-    expires = now + (timedelta(days=settings.refresh_token_days) if refresh else timedelta(minutes=settings.access_token_minutes))
-    payload: dict[str, Any] = {"sub": str(user.id), "username": user.username, "type": "refresh" if refresh else "access", "exp": expires}
+    expires = now + (
+        timedelta(days=settings.refresh_token_days) if refresh else timedelta(minutes=settings.access_token_minutes)
+    )
+    payload: dict[str, Any] = {
+        "sub": str(user.id),
+        "username": user.username,
+        "type": "refresh" if refresh else "access",
+        "exp": expires,
+    }
     return jwt.encode(payload, settings.secret_key.get_secret_value(), algorithm=ALGORITHM), expires
 
 
@@ -57,7 +63,9 @@ def get_current_user(
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="缺少 Bearer Token")
     try:
-        payload = jwt.decode(credentials.credentials, get_settings().secret_key.get_secret_value(), algorithms=[ALGORITHM])
+        payload = jwt.decode(
+            credentials.credentials, get_settings().secret_key.get_secret_value(), algorithms=[ALGORITHM]
+        )
         if payload.get("type") != "access" or not payload.get("sub"):
             raise ValueError("invalid token type")
         user = db.get(User, int(payload["sub"]))
@@ -75,7 +83,9 @@ def get_refresh_user(
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="缺少 Bearer Token")
     try:
-        payload = jwt.decode(credentials.credentials, get_settings().secret_key.get_secret_value(), algorithms=[ALGORITHM])
+        payload = jwt.decode(
+            credentials.credentials, get_settings().secret_key.get_secret_value(), algorithms=[ALGORITHM]
+        )
         if payload.get("type") != "refresh" or not payload.get("sub"):
             raise ValueError("invalid refresh token")
         user = db.get(User, int(payload["sub"]))

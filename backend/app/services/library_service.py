@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 from app.models.code import CodeRecord, DuplicateAllowance
 from app.models.storage import StorageGroup
 from app.models.task import DownloadTask
-from app.services.storage_service import group_roots, ignored_mounts, is_ignored_path
-from app.utils.code_extractor import canonical_code
+from app.services.storage_service import group_directories, group_roots, ignored_mounts, is_ignored_path
+from app.utils.code_extractor import canonical_code, extract_part_number
 from app.utils.paths import is_within, normalize_path
 
 
@@ -70,6 +70,7 @@ def serialize_code(row: CodeRecord) -> dict[str, Any]:
         "id": row.id,
         "code": row.code,
         "variant": row.variant,
+        "part_number": record_part(row),
         "storage_path": row.storage_path,
         "file_name": row.file_name,
         "file_size": row.file_size,
@@ -78,11 +79,33 @@ def serialize_code(row: CodeRecord) -> dict[str, Any]:
     }
 
 
+def record_part(row: CodeRecord) -> int | None:
+    return row.part_number if row.part_number is not None else extract_part_number(
+        row.storage_path + "/" + row.file_name, row.code
+    )
+
+
+def copy_counts(code: str, rows: list[CodeRecord], tasks: list[DownloadTask] | None = None) -> Counter:
+    counts = Counter((row.variant, record_part(row)) for row in rows)
+    for task in tasks or []:
+        # 旧任务或元数据降级时无法证明只下载某一集，用未知身份保守占位。
+        parts = task.part_numbers if code.startswith("FC2-PPV-") else None
+        counts.update((task.variant, part) for part in (parts or [None]))
+    return counts
+
+
+def has_same_copy(counts: Counter) -> bool:
+    return any(count > 1 for count in counts.values()) or any(
+        part is not None and (variant, None) in counts for variant, part in counts
+    )
+
+
 def duplicate_decision(
     db: Session,
     code: str,
     variant: str = "original",
     *,
+    part_numbers: list[int] | None = None,
     target_group: str | int | None = None,
     target_path: str | None = None,
 ) -> dict[str, Any]:
@@ -116,15 +139,19 @@ def duplicate_decision(
         existing_location = existing_location or (
             f"{rows[0].storage_path.rstrip('/')}/{rows[0].file_name}" if rows else tasks[0].target_path
         )
-        counts = Counter(row.variant for row in [*rows, *tasks])
+        counts = copy_counts(code, rows, tasks)
+        variants = {version for version, _ in counts}
         allowance = db.query(DuplicateAllowance).filter_by(group_id=group.id, code=code).first() if group else None
-        # 放行只允许不同版本各一份；原版本再次出现或组合中新加入未批准版本仍然拦截。
-        allowed = (
-            allowance is not None
-            and variant not in counts
-            and all(count == 1 for count in counts.values())
-            and set(counts) | {variant} <= set(allowance.variants)
+        separate_parts = (
+            code.startswith("FC2-PPV-") and bool(part_numbers)
+            and (variant, None) not in counts
+            and all((variant, part) not in counts for part in part_numbers)
         )
+        # 同版本的不同分集自然共存；跨版本仍须批准组合，且任何一集都不能因此保留重复副本。
+        versions_allowed = variants | {variant} == {variant} or (
+            allowance is not None and variants | {variant} <= set(allowance.variants)
+        )
+        allowed = not has_same_copy(counts) and versions_allowed and (variant not in variants or separate_parts)
         blocked = blocked or not allowed
     return {
         "exists_in_library": found,
@@ -142,6 +169,7 @@ def list_duplicates(db: Session, group_id: int | None = None, *, include_allowed
     )
     result = []
     for group in groups:
+        directories = group_directories(db, group)
         query = code_query(db, group)
         duplicates = query.with_entities(CodeRecord.code).group_by(CodeRecord.code).having(func.count() > 1)
         by_code = defaultdict(list)
@@ -149,10 +177,12 @@ def list_duplicates(db: Session, group_id: int | None = None, *, include_allowed
             by_code[row.code].append(row)
         allowances = {row.code: row for row in db.query(DuplicateAllowance).filter_by(group_id=group.id)}
         for code, rows in by_code.items():
-            counts = Counter(row.variant for row in rows)
-            variants = sorted(counts)
+            counts = copy_counts(code, rows)
+            variants = sorted({variant for variant, _ in counts})
             rule = allowances.get(code)
-            same_version = any(count > 1 for count in counts.values())
+            same_version = has_same_copy(counts)
+            if not same_version and len(variants) == 1:
+                continue
             allowed = not same_version and rule is not None and set(variants) <= set(rule.variants)
             if allowed and not include_allowed:
                 continue
@@ -166,7 +196,13 @@ def list_duplicates(db: Session, group_id: int | None = None, *, include_allowed
                     "ignored": allowed,
                     "can_ignore": not same_version,
                     "reason": "same_version" if same_version else "version_combination",
-                    "files": [serialize_code(row) for row in rows],
+                    "files": [serialize_duplicate_file(row, directories) for row in rows],
                 }
             )
     return result
+
+
+def serialize_duplicate_file(row: CodeRecord, directories: list[dict]) -> dict:
+    matches = [item for item in directories if is_within(row.storage_path, item["path"])]
+    length = max((len(item["path"]) for item in matches), default=0)
+    return {**serialize_code(row), "directory_matches": [item for item in matches if len(item["path"]) == length]}

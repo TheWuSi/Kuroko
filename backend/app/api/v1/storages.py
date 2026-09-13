@@ -16,11 +16,16 @@ from app.schemas.storage import (
 )
 from app.services.config_service import get_config, update_config
 from app.services.openlist_client import OpenListError
-from app.services.read_cache import openlist_read_cache
+from app.services.storage_events import storage_events
 from app.services.storage_service import get_client, is_ignored_path, resolve_storage_path, storage_info
 from app.utils.paths import child_path, join_path, normalize_path
 
 router = APIRouter(tags=["Storage"], dependencies=[Depends(get_current_user)])
+
+
+@router.get("/storages/revision")
+def storage_revision():
+    return success(storage_events.current())
 
 
 @router.get("/storages")
@@ -59,7 +64,7 @@ def set_ignored(payload: StorageIgnoreRequest, storage_id: int = Path(ge=1), db:
     elif not payload.ignored and row is not None:
         db.delete(row)
     db.commit()
-    openlist_read_cache.clear()
+    storage_events.invalidate()
     return success({"storage_id": storage_id, "ignored": payload.ignored})
 
 
@@ -124,18 +129,48 @@ def update_space(
             else:
                 row.total_space_bytes = payload.total_space_bytes
             db.commit()
-            openlist_read_cache.clear()
+            storage_events.invalidate()
             refreshed = storage_info(db, client=client, remote=remote, storage_id=storage_id, include_ignored=True)
             return success(next(item for item in refreshed if item["id"] == storage_id))
     except OpenListError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@router.delete("/storages/{storage_id}/space")
+def reset_space(storage_id: int = Path(ge=1), db: Session = Depends(get_db)):
+    try:
+        with get_client(db) as client:
+            storage = next((item for item in client.get_storage_info() if item["id"] == storage_id), None)
+            if storage is None:
+                raise HTTPException(status_code=404, detail="存储节点不存在")
+            db.query(StorageSpaceOverride).filter_by(storage_mount=storage["mount_path"]).delete()
+            db.commit()
+            storage_events.invalidate()
+            try:
+                refreshed = storage_info(db, client=client, storage_id=storage_id, include_ignored=True, refresh=True)
+                node = next((item for item in refreshed if item["id"] == storage_id), None)
+                if node is not None:
+                    return success(node)
+                error = "原生容量读取时存储已被移除"
+            except OpenListError as exc:
+                error = str(exc)
+            # 恢复自动与上游容量是否可读相互独立，不能在读取失败时把已删除的配额显示回来。
+            return success({
+                "id": storage_id, "mount_path": storage["mount_path"], "driver": storage["driver"],
+                "status": storage["status"], "ignored": db.get(StorageIgnore, storage_id) is not None,
+                "total_space": None, "used_space": None, "free_space": None,
+                "space_source": "openlist", "space_error": f"已恢复自动获取，原生容量读取失败：{error}",
+            })
+    except OpenListError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 def group_data(group: StorageGroup) -> dict:
+    members = sorted(group.paths, key=lambda item: (-(item.priority or 0), item.id))
     return {
         "id": group.id,
         "name": group.name,
-        "storage_paths": [join_path(item.storage_mount, item.folder_path) for item in group.paths],
+        "storage_paths": [join_path(item.storage_mount, item.folder_path) for item in members],
         "members": [
             {
                 "id": item.id,
@@ -143,8 +178,9 @@ def group_data(group: StorageGroup) -> dict:
                 "storage_mount": item.storage_mount,
                 "download_path": join_path(item.storage_mount, item.folder_path),
                 "archive_paths": [join_path(item.storage_mount, folder) for folder in (item.archive_folders or [])],
+                "priority": item.priority,
             }
-            for item in group.paths
+            for item in members
         ],
         "paths": [
             {
@@ -153,8 +189,9 @@ def group_data(group: StorageGroup) -> dict:
                 "folder_path": item.folder_path,
                 "storage_id": item.storage_id,
                 "archive_folders": item.archive_folders or [],
+                "priority": item.priority,
             }
-            for item in group.paths
+            for item in members
         ],
         "created_at": group.created_at.isoformat(),
         "updated_at": group.updated_at.isoformat(),
@@ -198,6 +235,7 @@ def resolve_group_members(
                     storage_mount=storage["mount_path"],
                     folder_path=download,
                     archive_folders=list(dict.fromkeys(archives)),
+                    priority=member.priority,
                 )
             )
         return result
@@ -227,6 +265,7 @@ def create_group(payload: StorageGroupRequest, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=409, detail="分组名称或路径重复") from exc
     db.refresh(group)
+    storage_events.invalidate()
     return success(group_data(group))
 
 
@@ -241,6 +280,14 @@ def update_group(payload: StorageGroupUpdate, group_id: int = Path(ge=1), db: Se
         else None
     )
     old_name = group.name
+    if members is not None:
+        requested = {member.storage_id: member for member in payload.members or []}
+        for member in members:
+            source = requested.get(member.storage_id)
+            if source is None or "priority" not in source.model_fields_set:
+                previous = next((old for old in group.paths if old.storage_id == member.storage_id
+                                 or (old.storage_id is None and old.storage_mount == member.storage_mount)), None)
+                member.priority = previous.priority if previous is not None else 0
     if payload.storage_paths is not None and members is not None:
         # 旧客户端只更新下载路径，没有表达清空归档配置的意图，按节点保留已有归档目录。
         for member in members:
@@ -274,6 +321,7 @@ def update_group(payload: StorageGroupUpdate, group_id: int = Path(ge=1), db: Se
             if not (payload.members is not None and item.get("group_name") == old_name)
         ]
         update_config(db, {"probe_paths": probes})
+    storage_events.invalidate()
     return success(group_data(group))
 
 
@@ -285,4 +333,5 @@ def delete_group(group_id: int = Path(ge=1), db: Session = Depends(get_db)):
     db.query(DuplicateAllowance).filter(DuplicateAllowance.group_id == group_id).delete()
     db.delete(group)
     db.commit()
+    storage_events.invalidate()
     return success({"id": group_id, "deleted": True})

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.models.config import SystemConfig
+from app.services.storage_events import storage_events
 
 DEFAULTS: dict[str, Any] = {
     "openlist": {"base_url": "", "auth_type": "token", "username": "", "password": "", "token": ""},
@@ -64,6 +65,8 @@ def merge_section(current: dict[str, Any], patch: dict[str, Any]) -> dict[str, A
 
 def update_config(db: Session, patch: dict[str, Any]) -> dict[str, Any]:
     current = get_config(db, masked=False)
+    old_openlist = deepcopy(current["openlist"])
+    old_probes = deepcopy(current["probe_paths"])
     for section, value in patch.items():
         if value is None:
             continue
@@ -79,4 +82,8 @@ def update_config(db: Session, patch: dict[str, Any]) -> dict[str, Any]:
         else:
             row.value = json.dumps(current[section], ensure_ascii=False)
     db.commit()
+    if current["openlist"] != old_openlist:
+        storage_events.invalidate(source_changed=True)
+    elif current["probe_paths"] != old_probes:
+        storage_events.invalidate()
     return get_config(db)

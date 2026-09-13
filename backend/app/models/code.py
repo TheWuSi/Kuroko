@@ -12,6 +12,7 @@ class CodeRecord(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     code: Mapped[str] = mapped_column(String(64), index=True)
     variant: Mapped[str] = mapped_column(String(16), default="original", server_default="original")
+    part_number: Mapped[int | None] = mapped_column(nullable=True)
     storage_path: Mapped[str] = mapped_column(String(1024))
     file_name: Mapped[str] = mapped_column(String(1024))
     file_size: Mapped[int] = mapped_column(Integer, default=0)

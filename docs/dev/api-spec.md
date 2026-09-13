@@ -228,6 +228,7 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
       "dn_code": "ABC-123",
       "verified_code": "ABC-123",
       "variant": "original",
+      "part_numbers": null,
       "total_files_count": 2,
       "total_size": 1073742848,
       "files": [{"name": "ABC-123.mkv", "size": 1073741824, "filtered": false}],
@@ -247,6 +248,8 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
 ```
 
 `total_size` 是整个种子的大小，包含过滤文件；过滤只用于番号提取和展示，不影响实际下载。元数据不可用时返回空文件列表、`total_size: 0`、`metadata_fallback: true`；此时 0 表示未知大小。`fallback_reason` 为 `bt_metadata_timeout`、`bt_metadata_unavailable`、`bt_metadata_invalid_request` 或 `bt_metadata_invalid_response`。
+
+FC2 解析结果增加 `part_numbers`：完整媒体文件树中识别到的分集号集合，0 表示无后缀基础分集；其他番号或元数据／分集信息不明时为 null。文件名与作品目录共同提供身份，`CD001.mp4` 等单独分集名继承 FC2 作品目录。实际提交会重新从服务端元数据核实，不采信客户端伪造的分集号。
 
 前端最多并发四条单磁力请求，保持输入顺序，单条等待时间高于后端最高 300 秒解析超时，并支持 AbortSignal。
 
@@ -278,7 +281,7 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
 
 直接使用 `/OD/Video`，不添加番号或任务 ID 目录，不做文件整理。目录须属于正常工作的挂载，目标路径须可使用 PikPak；目录不存在时交 OpenList 创建。指定目录允许元数据降级，自动调度则必须由后端取得完整正数大小，并排除容量未知的节点。
 
-已忽略节点始终拒绝下载，包括 `force: true`。组内所有下载及归档目录参与查重，活动任务同样参与；不同组独立。未分组目录可直接下载，仅检查该目录范围。相同番号的不同版本需满足已保存的允许组合；同版本再次出现仍拦截，显式 `force` 可覆盖番号拦截。
+已忽略节点始终拒绝下载，包括 `force: true`。组内所有下载及归档目录参与查重，活动任务同样参与；不同组独立。未分组目录可直接下载，仅检查该目录范围。相同番号的不同版本需满足已保存的允许组合；FC2 同版本的不同分集自然共存，同版本同分集再次出现仍拦截，显式 `force` 可覆盖番号拦截。
 
 业务响应始终包含三个列表；单项失败不回滚之前已提交的任务：
 
@@ -309,7 +312,7 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
 
 ### 4.3 切换位置后的查重预检
 
-`POST /api/v1/magnets/check-duplicates` 仅查询本地索引及活动任务，不重新请求磁力元数据。`items` 包含 1～100 个 `{code, variant}`，支持与解析相同的 `target_group/target_path`。
+`POST /api/v1/magnets/check-duplicates` 仅查询本地索引及活动任务，不重新请求磁力元数据。`items` 包含 1～100 个 `{code, variant, part_numbers?}`，支持与解析相同的 `target_group/target_path`。可选 `part_numbers` 为 1～1000 个 0～9999 的整数，去重排序后参与 FC2 检查；省略或 null 表示信息不明，不自动放宽同版本检查。下载任务持久化同一分集集合，任务响应也返回 `variant/part_numbers`。
 
 ```json
 {"items": [{"code": "FC2-654321", "variant": "UC"}], "target_group": 1}
@@ -433,6 +436,8 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
 
 先读取原生 `mount_details`；列表缺失时再查挂载根目录。只有缺少已用容量时才统计当前挂载目录，查询/统计共享 30 秒预算，并限制 1000 个目录及 100000 个文件。有独立子挂载、读取失败、分页不完整或超预算时保持未知。配额保存成功与容量统计成功是两件事，界面需展示 `space_error`。
 
+`DELETE /api/v1/storages/{storage_id}/space` 删除手动配额，恢复自动获取，返回更新后的节点。有效节点重复调用可成功；未知 ID 返回 404。配额删除成功后，即使原生容量刷新失败也返回 `space_source: openlist`、未知容量及 `space_error`，不会恢复手动值。
+
 以上存储接口均需要认证，不返回 `addition`、账号密码或刷新令牌。
 
 ---
@@ -453,6 +458,12 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
 
 `GET /api/v1/storages/ignored` 返回 `data.items: [{storage_id, storage_mount}]`，仅读本地配置，便于上游不可用时撤销。`GET /storages?include_ignored=true` 可包含忽略节点，标记 `ignored: true`，不查询它的容量；已移除节点状态为 `missing`。
 
+### 6.5 查询展示缓存版本
+
+`GET /api/v1/storages/revision` 仅读内存版本，需要认证，返回 `data: {source_id, revision}`。`source_id` 为不含凭据的随机数据源标识，服务重启或 OpenList 连接变化时更换；`revision` 为递增整数，在分组、配额、忽略项、旧探测配置变化及离线／转存／扫描任务终态时更新。相同任务终态的重复读取不会反复失效。
+
+前端以 Zustand 和 `sessionStorage` 保存成功快照及更新时间，按用户和数据源隔离；全局每 10 秒核对轻量版本，版本变化或手动刷新时读取节点、分组和忽略项。并发刷新合并，读取过程中版本变化或旧请求迟到时不写入过期结果；失败保留同源成功信息，退出登录清理缓存。自动调度继续使用后端 30 秒有界读取缓存与活动任务容量预留。
+
 ## 7. 模块 5: 存储分组 (Storage Groups)
 
 ### 7.1 读取分组
@@ -470,10 +481,11 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
     "storage_id": 73,
     "storage_mount": "/OD",
     "download_path": "/OD/Downloads",
-    "archive_paths": ["/OD/Archive"]
+    "archive_paths": ["/OD/Archive"],
+    "priority": 10
   }],
   "storage_paths": ["/OD/Downloads"],
-  "paths": [{"id": 1, "storage_id": 73, "storage_mount": "/OD", "folder_path": "/Downloads", "archive_folders": ["/Archive"]}],
+  "paths": [{"id": 1, "storage_id": 73, "storage_mount": "/OD", "folder_path": "/Downloads", "archive_folders": ["/Archive"], "priority": 10}],
   "created_at": "2026-09-13T00:00:00",
   "updated_at": "2026-09-13T00:00:00"
 }
@@ -489,15 +501,15 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
 {
   "name": "主媒体库",
   "members": [
-    {"storage_id": 73, "download_path": "/OD/Downloads", "archive_paths": ["/OD/Archive"]},
-    {"storage_id": 99, "download_path": "/GD/Incoming", "archive_paths": ["/GD/Library"]}
+    {"storage_id": 73, "download_path": "/OD/Downloads", "archive_paths": ["/OD/Archive"], "priority": 10},
+    {"storage_id": 99, "download_path": "/GD/Incoming", "archive_paths": ["/GD/Library"], "priority": 0}
   ]
 }
 ```
 
-名称 1～100 字符且唯一；成员 1～100 个，每成员一个下载目录，归档目录 0～20 个。目录最多 1024 字符，须属于指定真实存储 ID 的具体子目录；拒绝跨挂载、根目录、路径遍历及控制字符。不会自动移动或创建媒体库文件。
+名称 1～100 字符且唯一；成员 1～100 个，每成员一个下载目录，归档目录 0～20 个。成员 `priority` 为 0～9999 的整数，创建时默认 0，拒绝字符串、浮点数和布尔值。数值越大越优先，同优先级沿用最小剩余空间选择；扣除活动任务预留后空间不足时顺延。目录最多 1024 字符，须属于指定真实存储 ID 的具体子目录；拒绝跨挂载、根目录、路径遍历及控制字符。不会自动移动或创建媒体库文件。
 
-为兼容旧客户端，仍接受 `storage_paths: ["/OD/Downloads"]`，并按最长挂载前缀解析；`members` 与 `storage_paths` 不可同时提交。旧路径更新保留同节点已有归档目录；新 `members` 的 `archive_paths` 省略时为空列表。新成员配置保存后接管同名旧探测配置，单独改名保留目录。
+为兼容旧客户端，仍接受 `storage_paths: ["/OD/Downloads"]`，并按最长挂载前缀解析；`members` 与 `storage_paths` 不可同时提交。旧路径更新保留同节点已有归档目录；`storage_paths` 更新或成员未提交 `priority` 时保留已有优先级；新 `members` 的 `archive_paths` 省略时为空列表。新成员配置保存后接管同名旧探测配置，单独改名保留目录。
 
 ### 7.3 删除分组
 
@@ -510,7 +522,7 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
 - **认证**：需要 Bearer Token
 - **描述**：分页查询已发现并归档在库中的番号记录，支持按分组过滤及关键字模糊搜索。
 
-分组范围包含每个成员的下载和归档目录，采用目录边界匹配，过滤已忽略节点。每条记录增加 `id`、`variant`、`source`；`total` 是媒体文件记录数。`search` 最多 64 字符，大小写及 FC2 前缀会归一化，通配符按普通字符搜索。
+分组范围包含每个成员的下载和归档目录，采用目录边界匹配，过滤已忽略节点。每条记录包含 `id`、`variant`、`part_number`、`source`；`total` 是媒体文件记录数，`total_codes` 是同一筛选范围内的去重番号数，分页继续按文件。FC2 的无后缀文件记为 `part_number: 0`，有明确分集后缀时保存数字，其他番号为 null。`search` 最多 64 字符，大小写及 FC2 前缀会归一化，通配符按普通字符搜索。
 
 #### 查询参数 (Query)
 | 字段 | 类型 | 必选 | 默认值 | 说明 |
@@ -533,6 +545,7 @@ curl -X GET "http://localhost:8000/api/v1/codes?group_id=1&search=ABC&page=1&pag
   "message": "success",
   "data": {
     "total": 100,
+    "total_codes": 80,
     "page": 1,
     "page_size": 50,
     "items": [
@@ -540,6 +553,7 @@ curl -X GET "http://localhost:8000/api/v1/codes?group_id=1&search=ABC&page=1&pag
         "id": 1,
         "code": "ABC-123",
         "variant": "original",
+        "part_number": null,
         "source": "scan",
         "storage_path": "/OD/Video1",
         "file_name": "ABC-123.mp4",
@@ -550,6 +564,7 @@ curl -X GET "http://localhost:8000/api/v1/codes?group_id=1&search=ABC&page=1&pag
         "id": 2,
         "code": "ABC-124",
         "variant": "original",
+        "part_number": null,
         "source": "scan",
         "storage_path": "/OD/Video1",
         "file_name": "ABC-124.mkv",
@@ -568,7 +583,7 @@ curl -X GET "http://localhost:8000/api/v1/codes?group_id=1&search=ABC&page=1&pag
 - **认证**：需要 Bearer Token
 - **描述**：异步扫描分组的下载与归档目录，兼容旧探测路径配置。`GET /api/v1/codes/scan/paths?group_id=1` 可预览完整路径列表，返回 `data.paths`。忽略节点跳过，未选择分组时扫描全部配置范围。
 
-无有效目录或范围为整个挂载/根目录返回 400，未知分组 404，已有扫描运行时 409。单根限制 300 秒、5000 个目录与 100000 个条目。完整读取成功后同步失效扫描记录，失败保留旧索引。不会移动或删除媒体文件。
+无有效目录或范围为整个挂载/根目录返回 400，未知分组 404，已有扫描运行时 409。不设单根总时限，保留单次 HTTP 请求超时以及单根 5000 个目录、100000 个条目的上限。启动时保存 `scan_paths` 快照，后续编辑分组不会改变本次范围。完整读取成功后同步失效扫描记录，取消或失败保留未完成范围的旧索引。不会移动或删除媒体文件。
 
 #### 请求参数 (Body)
 | 字段 | 类型 | 必选 | 说明 |
@@ -624,11 +639,17 @@ curl -X GET "http://localhost:8000/api/v1/codes/scan/status" \
   "data": {
     "task_id": "scan-e41ac820-21a1-460d-9b57-61c0d54a2a11",
     "status": "scanning",
+    "group_id": 1,
+    "scan_paths": ["/OD/Video1", "/OD/Video2", "/GD/Incoming", "/GD/Library"],
+    "cancel_requested": false,
+    "scanned_dirs": 31,
+    "total_roots": 4,
+    "completed_roots": 2,
     "scanned_files": 1250,
     "new_codes_found": 86,
     "duplicates_found": 0,
     "current_path": "/OD/Video1/Archive",
-    "progress_percent": 65.4,
+    "progress_percent": 50,
     "started_at": "2026-09-06T19:50:00Z",
     "completed_at": null,
     "error_message": null
@@ -637,6 +658,8 @@ curl -X GET "http://localhost:8000/api/v1/codes/scan/status" \
 ```
 
 ---
+
+`progress_percent` 表示配置扫描范围的完成度，文件总量尚未知时不表示文件扫描比例。扫描时间使用明确 UTC 偏移。前端全局在运行时每 2 秒查询，空闲时每 10 秒查询；状态读取失败退避重试，保留当前任务。关闭面板、切页或刷新后继续跟踪；服务重启把未完成任务标记为中断失败。
 
 ### 8.4 从统计表删除指定番号
 - **路径**：`DELETE /api/v1/codes/{code}`
@@ -691,7 +714,9 @@ curl -X DELETE "http://localhost:8000/api/v1/codes/ABC-123" \
 }
 ```
 
-同版本多份时 `reason: same_version`、`can_ignore: false`。只有所有版本各一份且均在已批准集合内才为 `ignored: true`，默认不列出。未知版本标为 `original`；`FC2-1234567` 与 `FC2-PPV-1234567` 合并为一个番号。
+普通番号同版本多份，或 FC2 同版本同分集多份时，`reason: same_version`、`can_ignore: false`。FC2 不同分集不单独生成重复项；跨版本仍需要批准组合，且每个版本的每一集只能有一份。满足规则时 `ignored: true`，默认不列出。未知版本标为 `original`；`FC2-1234567` 与 `FC2-PPV-1234567` 合并为一个番号。
+
+每个 `files[]` 还包含 `part_number` 和 `directory_matches`，后者为 `{storage_id, storage_mount, kind, path}` 数组：`kind` 为 `download/archive/probe`，分别表示下载、归档及保留的历史探测目录，`path` 为命中的配置根路径。按最长目录匹配；同一路径兼具下载和归档用途时保留两项。前端每个重复项目右侧都显示共存按钮，不可放行时禁用并说明原因。
 
 ### 8.6 持久化允许版本组合
 
@@ -701,9 +726,13 @@ curl -X DELETE "http://localhost:8000/api/v1/codes/ABC-123" \
 {"group_id": 1, "code": "ABC-123", "variants": ["C", "UC"]}
 ```
 
-`variants` 必须包含 2～4 个不同值，可选 `original/C/UC/U`。按分组和规范番号保存，文件移动和重新扫描不影响规则；重复的同版本不会因此放行。规则也供下载预检和提交使用。返回 `{id, group_id, code, variants}`。
+`variants` 必须包含 2～4 个不同值，可选 `original/C/UC/U`。按分组和规范番号保存，文件移动和重新扫描不影响规则；普通番号的同版本重复，以及 FC2 同版本同分集重复，都不会因此放行。规则也供下载预检和提交使用。返回 `{id, group_id, code, variants}`。
 
 `GET /api/v1/codes/duplicate-ignores?group_id=1` 返回 `data.items`，每项包含 `id/group_id/group_name/code/variants`，即使文件暂时消失仍可管理规则。`DELETE /api/v1/codes/duplicate-ignores/{rule_id}` 撤销并返回 `{id, deleted: true}`。分组或规则不存在为 404，输入无效为 422，所有接口均需认证。
+
+### 8.7 取消定向扫描
+
+`POST /api/v1/codes/scan/{task_id}/cancel`，无需请求体，需要认证。任务 ID 最多 64 字符；不存在返回 404，已完成或失败返回 409，重复取消请求及已取消任务返回当前扫描状态。运行中的任务先保存 `cancel_requested: true`，工作线程在分页和文件批次之间停止，最终状态为 `cancelled`。仅取消任务，不删除媒体文件；未完成目录范围的旧索引保留。
 
 ## 9. 模块 7: 在线配置 (Config)
 

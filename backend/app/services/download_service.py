@@ -10,8 +10,9 @@ from app.models.task import DownloadTask, TaskStatus
 from app.services.config_service import get_config
 from app.services.library_service import duplicate_decision, find_group
 from app.services.magnet_metadata_client import MagnetMetadataApiClient
-from app.services.magnet_service import metadata_variant
+from app.services.magnet_service import metadata_parts, metadata_variant
 from app.services.openlist_client import OpenListError, nonnegative_int
+from app.services.storage_events import storage_events
 from app.services.storage_service import choose_target, get_client, is_ignored_path, resolve_storage_path, storage_info
 from app.utils.code_extractor import canonical_code
 from app.utils.magnet_parser import clean_magnet, magnet_info_hash
@@ -92,7 +93,8 @@ def submit_batch(db: Session, tasks: list[dict[str, Any]]) -> dict[str, list[dic
 
 def _submit_batch(db: Session, tasks: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     submitted, skipped, failed = [], [], []
-    config = get_config(db, masked=False)["bt_parser"]
+    full_config = get_config(db, masked=False)
+    config = full_config["bt_parser"]
     mounts = infos = None
     metadata_cache: dict[str, dict[str, Any]] = {}
     checked_paths: set[str] = set()
@@ -120,6 +122,7 @@ def _submit_batch(db: Session, tasks: list[dict[str, Any]]) -> dict[str, list[di
                     metadata_cache[info_hash] = parser.parse_with_fallback(magnet)
                 metadata = metadata_cache[info_hash]
                 variant = metadata_variant(metadata, code, magnet)
+                parts = metadata_parts(metadata, code, full_config)
                 if variant == "original" and item.get("variant"):
                     variant = item["variant"]
                 size = metadata["size"]
@@ -165,6 +168,7 @@ def _submit_batch(db: Session, tasks: list[dict[str, Any]]) -> dict[str, list[di
                     db,
                     code,
                     variant,
+                    part_numbers=parts,
                     target_group=item.get("target_group"),
                     target_path=target,
                 )
@@ -191,7 +195,9 @@ def _submit_batch(db: Session, tasks: list[dict[str, Any]]) -> dict[str, list[di
                     if "PikPak" not in client.get_offline_tools(target):
                         raise ValueError("OpenList 未启用 PikPak 离线工具，请检查 PikPak 挂载和离线临时目录")
                     checked_paths.add(target)
-                task = DownloadTask(code=code, variant=variant, magnet=magnet, target_path=target, total_size=size)
+                task = DownloadTask(
+                    code=code, variant=variant, part_numbers=parts, magnet=magnet, target_path=target, total_size=size
+                )
                 db.add(task)
                 # 先确认本地能够保存任务，再执行不可回滚的上游提交；各条任务单独提交事务。
                 db.commit()
@@ -280,4 +286,15 @@ def sync_tasks(db: Session) -> list[DownloadTask]:
             # 离线任务成功不代表独立转存任务已完成，番号库只接受实际扫描出的文件。
             updated.append(task)
         db.commit()
+        if any(task.status in {"completed", "failed", "cancelled"} for task in updated):
+            storage_events.invalidate()
     return updated
+
+
+def sync_transfer_revision(db: Session) -> None:
+    source_id = storage_events.current()["source_id"]
+    with get_client(db) as client:
+        transfers = client.get_offline_tasks(kind="offline_download_transfer")
+    for task in transfers:
+        normalize_task(task)
+    storage_events.observe_transfers(transfers, source_id)

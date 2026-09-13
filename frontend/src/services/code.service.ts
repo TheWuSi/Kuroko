@@ -34,6 +34,11 @@ export const codeService = {
     return res.data.data
   },
 
+  async cancelScan(taskId: string): Promise<ScanJobStatus> {
+    const res = await apiClient.post<ApiResponse<ScanJobStatus>>(`/codes/scan/${encodeURIComponent(taskId)}/cancel`)
+    return res.data.data
+  },
+
   async getScanPaths(groupId?: number, signal?: AbortSignal): Promise<string[]> {
     const res = await apiClient.get<ApiResponse<{ paths: string[] }>>('/codes/scan/paths', {
       params: { group_id: groupId }, signal,

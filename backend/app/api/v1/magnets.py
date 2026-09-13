@@ -39,7 +39,8 @@ def check_duplicates(payload: DuplicateCheckRequest, db: Session = Depends(get_d
             {
                 "items": [
                     duplicate_decision(
-                        db, item.code, item.variant, target_group=payload.target_group, target_path=payload.target_path
+                        db, item.code, item.variant, part_numbers=item.part_numbers,
+                        target_group=payload.target_group, target_path=payload.target_path
                     )
                     for item in payload.items
                 ]

@@ -1,4 +1,5 @@
 import re
+from pathlib import PurePosixPath
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -6,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.services.config_service import get_config
 from app.services.library_service import duplicate_decision
 from app.services.magnet_metadata_client import MagnetMetadataApiClient
-from app.utils.code_extractor import extract_code, extract_variant
+from app.utils.code_extractor import extract_code, extract_media_code, extract_part_number, extract_variant
 from app.utils.magnet_parser import clean_magnet, magnet_display_name
 
 
@@ -54,6 +55,22 @@ def metadata_variant(metadata: dict[str, Any], code: str, magnet: str) -> str:
     return next((variant for name in names if (variant := extract_variant(name, code)) != "original"), "original")
 
 
+def metadata_parts(metadata: dict[str, Any], code: str, config: dict[str, Any]) -> list[int] | None:
+    if not code.startswith("FC2-PPV-") or metadata.get("metadata_fallback") or metadata.get("fallback"):
+        return None
+    files, _ = filter_files(metadata.get("files", []), config)
+    parts = set()
+    for file in files:
+        path = str(PurePosixPath(metadata.get("name") or "") / file["name"])
+        # 文件自身的番号优先，作品目录只为没有番号的文件提供上下文。
+        identity = extract_media_code(path, config["filter"].get("code_patterns", []))
+        if identity is None:
+            return None
+        if identity == code:
+            parts.add(extract_part_number(path, code))
+    return sorted(parts) if parts and len(parts) <= 1000 else None
+
+
 def parse_magnets(
     db: Session,
     links: list[str],
@@ -77,9 +94,12 @@ def parse_magnets(
             verified_code = (
                 next(
                     (
-                        extract_code(item["name"], config["filter"].get("code_patterns", []))
+                        identity
                         for item in valid
-                        if extract_code(item["name"], config["filter"].get("code_patterns", []))
+                        if (identity := extract_media_code(
+                            str(PurePosixPath(parsed.get("name") or "") / item["name"]),
+                            config["filter"].get("code_patterns", []),
+                        ))
                     ),
                     None,
                 )
@@ -89,11 +109,13 @@ def parse_magnets(
             variant = (
                 metadata_variant({**parsed, "files": valid}, verified_code, cleaned) if verified_code else "original"
             )
+            parts = metadata_parts(parsed, verified_code, config) if verified_code else None
             decision = (
                 duplicate_decision(
                     db,
                     verified_code,
                     variant,
+                    part_numbers=parts,
                     target_group=target_group,
                     target_path=target_path,
                 )
@@ -112,6 +134,7 @@ def parse_magnets(
                     "dn_code": dn_code,
                     "verified_code": verified_code,
                     "variant": variant,
+                    "part_numbers": parts,
                     "total_files_count": len(valid) + len(rejected),
                     "total_size": parsed["size"],
                     "info_hash": parsed["info_hash"],

@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from typing import Any
@@ -19,14 +20,23 @@ from app.services.config_service import get_config
 from app.services.library_service import find_group, list_duplicates, path_condition
 from app.services.magnet_service import filter_files
 from app.services.openlist_client import OpenListError
+from app.services.storage_events import storage_events
 from app.services.storage_service import get_client, group_roots, is_ignored_path, resolve_storage_path
-from app.utils.code_extractor import extract_code, extract_variant
+from app.utils.code_extractor import extract_media_code, extract_part_number, extract_variant
 from app.utils.paths import child_path, is_within, join_path, normalize_path
 
 scan_lock = threading.Lock()
 
 
 class ScanBusyError(ValueError):
+    pass
+
+
+class ScanCancelledError(Exception):
+    pass
+
+
+class ScanRootIgnoredError(Exception):
     pass
 
 
@@ -38,10 +48,15 @@ def serialize_scan_job(job: ScanJob) -> dict[str, Any]:
         "scanned_files": job.scanned_files,
         "new_codes_found": job.new_codes_found,
         "duplicates_found": job.duplicates_found,
+        "scan_paths": job.scan_paths,
+        "cancel_requested": job.cancel_requested,
+        "scanned_dirs": job.scanned_dirs,
+        "total_roots": job.total_roots,
+        "completed_roots": job.completed_roots,
         "current_path": job.current_path,
         "progress_percent": job.progress_percent,
-        "started_at": job.started_at.isoformat(),
-        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        "started_at": job.started_at.replace(tzinfo=UTC).isoformat(),
+        "completed_at": job.completed_at.replace(tzinfo=UTC).isoformat() if job.completed_at else None,
         "error_message": job.error_message,
     }
 
@@ -65,14 +80,18 @@ def configured_scan_roots(db: Session, group_id: int | None = None) -> list[str]
 
 
 def create_scan_job(db: Session, group_id: int | None = None) -> ScanJob:
-    if not configured_scan_roots(db, group_id):
+    roots = configured_scan_roots(db, group_id)
+    if not roots:
         raise ValueError("没有可扫描的目录，请配置分组的下载、归档目录并检查忽略项")
     if not scan_lock.acquire(blocking=False):
         raise ScanBusyError("已有扫描任务正在运行")
     try:
         if db.query(ScanJob).filter(ScanJob.status.in_(["pending", "scanning"])).first():
             raise ScanBusyError("已有扫描任务正在运行")
-        job = ScanJob(task_id=f"scan-{uuid.uuid4()}", group_id=group_id, status="pending")
+        job = ScanJob(
+            task_id=f"scan-{uuid.uuid4()}", group_id=group_id, status="pending",
+            scan_paths=roots, total_roots=len(roots),
+        )
         db.add(job)
         db.commit()
         db.refresh(job)
@@ -89,10 +108,13 @@ def recover_orphaned_scans(db: Session) -> int:
         job.completed_at = datetime.now(UTC)
     if rows:
         db.commit()
+        storage_events.invalidate()
     return len(rows)
 
 
-def _walk_probe(client: Any, root: str, *, excluded: list[str], deadline: float):
+def _walk_probe(
+    client: Any, root: str, *, excluded: list[str], check: Callable[[], None], visit: Callable[[str], None]
+):
     root = normalize_path(root)
     if root == "/":
         raise ValueError("不可扫描 OpenList 根目录")
@@ -100,16 +122,17 @@ def _walk_probe(client: Any, root: str, *, excluded: list[str], deadline: float)
     visited: set[str] = set()
     count = 0
     while pending:
-        if time.monotonic() >= deadline or len(visited) >= 5000 or count >= 100000:
-            raise ValueError("扫描超过时间或目录数量预算，请缩小扫描范围")
+        if len(visited) >= 5000 or count >= 100000:
+            raise ValueError("扫描超过目录或文件数量预算，请缩小扫描范围")
         current = pending.pop()
         if current in visited or any(is_within(current, mount) for mount in excluded):
             continue
         visited.add(current)
+        visit(current)
         # 用户发起的扫描读取最新目录；浏览器目录选择仍使用短时缓存。
-        for entry in client.list_files(current, deadline=deadline, refresh=True):
-            if time.monotonic() >= deadline or count >= 100000:
-                raise ValueError("扫描超过时间或文件数量预算，请缩小扫描范围")
+        for entry in client.list_files(current, refresh=True, before_page=check):
+            if count >= 100000:
+                raise ValueError("扫描超过文件数量预算，请缩小扫描范围")
             full_path = child_path(current, entry["name"])
             if not is_within(full_path, root):
                 raise ValueError("扫描路径超出了指定目录")
@@ -142,17 +165,33 @@ def _sync_root(db: Session, client, job: ScanJob, root: str, remote: list[dict],
     seen: set[int] = set()
     job.current_path = root
     db.commit()
-    for file in _walk_probe(client, root, excluded=excluded, deadline=time.monotonic() + 300):
-        if is_ignored_path(db, root, remote):
-            # 扫描期间新增忽略项时停止此节点，并保留尚未读取的旧记录。
-            db.commit()
-            return
+    last_checkpoint = time.monotonic()
+
+    def checkpoint() -> None:
+        nonlocal last_checkpoint
+        # 分页请求前完成当前批次，网络等待期间不占用 SQLite 写锁，取消和进度查询才能及时响应。
+        db.commit()
+        cancelled = db.query(ScanJob.cancel_requested).filter_by(task_id=job.task_id).scalar()
+        ignored = is_ignored_path(db, root, remote)
+        db.commit()
+        last_checkpoint = time.monotonic()
+        if cancelled:
+            raise ScanCancelledError()
+        if ignored:
+            raise ScanRootIgnoredError()
+
+    def visit(path: str) -> None:
+        job.current_path = path
+        job.scanned_dirs += 1
+        checkpoint()
+
+    for file in _walk_probe(client, root, excluded=excluded, check=checkpoint, visit=visit):
         job.scanned_files += 1
         valid, _ = filter_files([file], config)
         if valid:
             path = PurePosixPath(file["name"])
             patterns = config["filter"].get("code_patterns", [])
-            code = extract_code(path.name, patterns) or extract_code(str(path.parent), patterns)
+            code = extract_media_code(str(path), patterns)
             if code:
                 location = (str(path.parent), path.name)
                 row = by_location.get(location)
@@ -163,15 +202,17 @@ def _sync_root(db: Session, client, job: ScanJob, root: str, remote: list[dict],
                     job.new_codes_found += 1
                 row.code = code
                 row.variant = extract_variant(str(path), code)
+                row.part_number = extract_part_number(str(path), code)
                 row.file_size = file["size"]
                 row.source = "scan"
                 db.flush()
                 seen.add(row.id)
-        if job.scanned_files % 100 == 0:
+        if job.scanned_files % 100 == 0 or time.monotonic() - last_checkpoint >= 2:
             job.current_path = str(PurePosixPath(file["name"]).parent)
-            db.commit()
+            checkpoint()
+    checkpoint()
     # 只有完整读取成功才清理消失、移动或已不符合过滤规则的扫描记录。
-    # 权限失败、超时或超出预算会在上方抛出异常，绝不能用部分结果覆盖旧索引。
+    # 取消、权限失败、请求超时或超出预算会在上方抛出异常，绝不能用部分结果覆盖旧索引。
     for row in previous:
         if row.id not in seen and row.source == "scan" and not is_ignored_path(db, row.storage_path, remote):
             db.delete(row)
@@ -183,15 +224,21 @@ def run_scan(task_id: str) -> None:
         return
     db = SessionLocal()
     client = None
+    job = None
     try:
         job = db.query(ScanJob).filter(ScanJob.task_id == task_id).first()
         if not job:
             return
+        if job.status not in {"pending", "scanning"}:
+            return
+        if job.cancel_requested:
+            raise ScanCancelledError()
         job.status = "scanning"
         db.commit()
         config = get_config(db, masked=False)
-        roots = configured_scan_roots(db, job.group_id)
+        roots = job.scan_paths
         client = get_client(db)
+        db.commit()
         remote = client.get_storage_info(refresh=True)
         planned: list[tuple[str, int]] = []
         for root in roots:
@@ -203,15 +250,35 @@ def run_scan(task_id: str) -> None:
             planned.append((root, storage["id"]))
         if not planned:
             raise ValueError("没有可扫描的目录，请检查分组成员和忽略项")
+        job.total_roots = len(planned)
+        db.commit()
         for index, (root, _) in enumerate(planned):
-            _sync_root(db, client, job, root, remote, config)
+            if db.query(ScanJob.cancel_requested).filter_by(task_id=task_id).scalar():
+                raise ScanCancelledError()
+            try:
+                _sync_root(db, client, job, root, remote, config)
+            except ScanRootIgnoredError:
+                # 扫描期间忽略节点时保留其未读取记录，继续其余已确认的目录范围。
+                pass
+            job.completed_roots = index + 1
             job.progress_percent = round((index + 1) / len(planned) * 100, 2)
             db.commit()
-        job.duplicates_found = len(list_duplicates(db, job.group_id))
+        if job.group_id is None or db.get(StorageGroup, job.group_id) is not None:
+            job.duplicates_found = len(list_duplicates(db, job.group_id))
+        if db.query(ScanJob.cancel_requested).filter_by(task_id=task_id).scalar():
+            raise ScanCancelledError()
         job.status = "completed"
         job.progress_percent = 100
         job.completed_at = datetime.now(UTC)
         db.commit()
+    except ScanCancelledError:
+        db.rollback()
+        job = db.query(ScanJob).filter_by(task_id=task_id).first()
+        if job:
+            job.status = "cancelled"
+            job.cancel_requested = True
+            job.completed_at = datetime.now(UTC)
+            db.commit()
     except Exception as exc:
         db.rollback()
         job = db.query(ScanJob).filter(ScanJob.task_id == task_id).first()
@@ -223,6 +290,8 @@ def run_scan(task_id: str) -> None:
             job.completed_at = datetime.now(UTC)
             db.commit()
     finally:
+        if job is not None and job.status in {"completed", "failed", "cancelled"}:
+            storage_events.invalidate()
         if client is not None:
             client.close()
         db.close()

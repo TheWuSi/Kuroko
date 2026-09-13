@@ -1,5 +1,6 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios'
 import type { ApiResponse } from '@/types/api'
+import { clearStorageSnapshots } from '@/lib/storageCache'
 
 const TOKEN_KEY = 'kuroko_token'
 
@@ -45,7 +46,7 @@ apiClient.interceptors.response.use(
   (error: AxiosError<ApiResponse<unknown>>) => {
     if (axios.isCancel(error)) return Promise.reject(error)
     if (error.response?.status === 401) {
-      localStorage.removeItem(TOKEN_KEY)
+      removeStoredToken()
       // 非登录页且非初始化页时自动跳转回登录页
       if (window.location.pathname !== '/login' && window.location.pathname !== '/bootstrap') {
         window.location.href = '/login'
@@ -82,4 +83,5 @@ export function setStoredToken(token: string): void {
 
 export function removeStoredToken(): void {
   localStorage.removeItem(TOKEN_KEY)
+  clearStorageSnapshots()
 }

@@ -28,6 +28,7 @@ class StorageGroupPath(Base):
     storage_id: Mapped[int | None] = mapped_column(nullable=True)
     folder_path: Mapped[str] = mapped_column(String(1024))
     archive_folders: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
+    priority: Mapped[int] = mapped_column(default=0, server_default="0")
     group: Mapped[StorageGroup] = relationship(back_populates="paths")
 
 

@@ -13,9 +13,9 @@ import { normalizeStoragePath } from '@/lib/path'
 import { formatBytes } from '@/lib/format'
 import { variantLabel } from '@/lib/storage'
 import { magnetService } from '@/services/magnet.service'
-import { storageService } from '@/services/storage.service'
+import { useStorageStore } from '@/stores/storageStore'
 import { toast } from '@/stores/uiStore'
-import type { CodeVariant, MagnetParseItem, MagnetParseResponse, StorageGroup, StorageNodeInfo, TargetScope } from '@/types/api'
+import type { CodeVariant, MagnetParseItem, MagnetParseResponse, TargetScope } from '@/types/api'
 
 type SubmissionOutcome = {
   state: 'submitted' | 'failed' | 'unknown' | 'already_exists'
@@ -37,8 +37,8 @@ export function MagnetParser() {
   const [results, setResults] = useState<MagnetParseItem[]>([])
   const [parseErrors, setParseErrors] = useState<NonNullable<MagnetParseResponse['errors']>>([])
   const [outcomes, setOutcomes] = useState<Record<string, SubmissionOutcome>>({})
-  const [groups, setGroups] = useState<StorageGroup[]>([])
-  const [storages, setStorages] = useState<StorageNodeInfo[]>([])
+  const groups = useStorageStore((state) => state.groups)
+  const storages = useStorageStore((state) => state.storages)
   const [targetMode, setTargetMode] = useState<'direct' | 'group'>('direct')
   const [selectedStorage, setSelectedStorage] = useState('')
   const [selectedGroup, setSelectedGroup] = useState('')
@@ -58,7 +58,9 @@ export function MagnetParser() {
     ? { target_group: selectedGroup ? Number(selectedGroup) : undefined }
     : { target_path: normalizedTarget || undefined }
   const scopeKey = JSON.stringify(scope)
-  const identitiesKey = JSON.stringify(results.map((item) => ({ code: item.verified_code || item.dn_code || 'UNKNOWN', variant: item.variant })))
+  const identitiesKey = JSON.stringify(results.map((item) => ({
+    code: item.verified_code || item.dn_code || 'UNKNOWN', variant: item.variant, part_numbers: item.part_numbers,
+  })))
   const checkKey = scopeKey + identitiesKey + checkVersion
   const checking = results.length > 0 && targetReady && checkedKey !== checkKey
   const matchedGroups = targetMode === 'group' ? groups.filter((group) => group.id === Number(selectedGroup)) : groups.filter((group) => group.members.some((member) => (
@@ -66,24 +68,18 @@ export function MagnetParser() {
   )))
 
   useEffect(() => {
-    const controller = new AbortController()
-    storageService.getGroups(controller.signal).then((items) => {
-      setGroups(items)
-      setSelectedGroup((previous) => previous || (items[0] ? String(items[0].id) : ''))
-    }).catch((error) => { if (!controller.signal.aborted) toast.error(error instanceof Error ? error.message : '加载分组失败') })
-    storageService.getStorages(undefined, controller.signal).then((items) => {
-      setStorages(items)
-      setSelectedStorage((previous) => previous || (items[0] ? String(items[0].id) : ''))
-    }).catch((error) => { if (!controller.signal.aborted) toast.error(error instanceof Error ? error.message : '加载挂载失败') })
-    return () => { controller.abort(); parseController.current?.abort() }
-  }, [])
+    setSelectedGroup((previous) => groups.some((group) => String(group.id) === previous) ? previous : String(groups[0]?.id ?? ''))
+    setSelectedStorage((previous) => storages.some((node) => String(node.id) === previous) ? previous : String(storages[0]?.id ?? ''))
+  }, [groups, storages])
+
+  useEffect(() => () => { parseController.current?.abort() }, [])
 
   useEffect(() => {
     if (!targetReady || identitiesKey === '[]') return
     const controller = new AbortController()
     setCheckError('')
     const timer = setTimeout(() => {
-      const identities: Array<{ code: string; variant: CodeVariant }> = JSON.parse(identitiesKey)
+      const identities: Array<{ code: string; variant: CodeVariant; part_numbers: number[] | null }> = JSON.parse(identitiesKey)
       magnetService.checkDuplicates(identities, JSON.parse(scopeKey) as TargetScope, controller.signal).then((checks) => {
         if (controller.signal.aborted) return
         setResults((previous) => previous.map((item, index) => ({ ...item, ...checks[index] })))
@@ -320,7 +316,7 @@ export function MagnetParser() {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono text-lg font-bold">{item.verified_code || item.dn_code || '未识别番号'}</span>
                       <Badge variant="secondary" className="font-mono">{variantLabel(item.variant)}</Badge>
-                      {!targetReady ? <Badge variant="outline">待选择查重范围</Badge> : item.duplicate_allowed ? <Badge variant="success">版本组合已允许</Badge> : item.duplicate_blocked ? (
+                      {!targetReady ? <Badge variant="outline">待选择查重范围</Badge> : item.duplicate_allowed ? <Badge variant="success">分集或版本可共存</Badge> : item.duplicate_blocked ? (
                         <Badge variant="warning" className="gap-1"><AlertTriangle className="h-3.5 w-3.5" />库内已存在</Badge>
                       ) : <Badge variant="outline">库内未收录</Badge>}
                       {outcome?.state === 'submitted' && <Badge variant="info" className="gap-1"><CheckCircle2 className="h-3.5 w-3.5" />已提交</Badge>}

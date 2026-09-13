@@ -35,6 +35,7 @@ class StorageMemberRequest(BaseModel):
     storage_id: int = Field(ge=1)
     download_path: str = Field(min_length=1, max_length=1024)
     archive_paths: list[str] = Field(default_factory=list, max_length=20)
+    priority: int = Field(default=0, ge=0, le=9999, strict=True)
 
     _download = field_validator("download_path")(normalize_path)
     _archives = field_validator("archive_paths")(clean_paths)

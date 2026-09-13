@@ -11,19 +11,22 @@ import { Progress } from '@/components/ui/progress'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { storageService } from '@/services/storage.service'
-import { formatBytes } from '@/lib/format'
+import { formatBytes, formatDate } from '@/lib/format'
 import { normalizeStoragePath } from '@/lib/path'
 import { summarizeStorage } from '@/lib/storage'
 import { toast } from '@/stores/uiStore'
-import type { StorageNodeInfo, StorageGroup, StorageIgnore, StorageMemberInput } from '@/types/api'
+import { storageCache, useStorageStore } from '@/stores/storageStore'
+import type { StorageNodeInfo, StorageGroup, StorageMemberInput } from '@/types/api'
 
 type MemberDraft = StorageMemberInput & { storage_mount: string }
 
 export function Storages() {
-  const [storages, setStorages] = useState<StorageNodeInfo[]>([])
-  const [groups, setGroups] = useState<StorageGroup[]>([])
-  const [ignored, setIgnored] = useState<StorageIgnore[]>([])
-  const [loading, setLoading] = useState(true)
+  const storages = useStorageStore((state) => state.storages)
+  const groups = useStorageStore((state) => state.groups)
+  const ignored = useStorageStore((state) => state.ignored)
+  const loading = useStorageStore((state) => state.loading)
+  const loadError = useStorageStore((state) => state.error)
+  const updatedAt = useStorageStore((state) => state.updatedAt)
   const [busy, setBusy] = useState(false)
   const [ignoredOpen, setIgnoredOpen] = useState(false)
   const [groupOpen, setGroupOpen] = useState(false)
@@ -37,18 +40,8 @@ export function Storages() {
   const summary = summarizeStorage(storages)
 
   const loadData = useCallback(async (refresh = false) => {
-    setLoading(true)
-    const results = await Promise.allSettled([
-      storageService.getStorages({ refresh }),
-      storageService.getGroups(),
-      storageService.getIgnored(),
-    ])
-    if (results[0].status === 'fulfilled') setStorages(results[0].value)
-    if (results[1].status === 'fulfilled') setGroups(results[1].value)
-    if (results[2].status === 'fulfilled') setIgnored(results[2].value)
-    const failed = results.find((result) => result.status === 'rejected')
-    if (failed?.status === 'rejected') toast.error(failed.reason instanceof Error ? failed.reason.message : '部分存储信息加载失败')
-    setLoading(false)
+    if (refresh) storageCache.invalidate()
+    await storageCache.refresh(refresh)
   }, [])
 
   useEffect(() => { void loadData() }, [loadData])
@@ -57,6 +50,7 @@ export function Storages() {
     setBusy(true)
     try {
       await storageService.setIgnored(storageId, value)
+      storageCache.invalidate()
       toast.success(value ? '已忽略该节点，停止分配下载并跳过扫描' : '已恢复该节点')
       await loadData()
     } catch (error) {
@@ -73,6 +67,7 @@ export function Storages() {
       storage_mount: member.storage_mount,
       download_path: member.download_path,
       archive_paths: [...member.archive_paths],
+      priority: member.priority ?? 0,
     })))
     setGroupOpen(true)
   }
@@ -80,7 +75,7 @@ export function Storages() {
   const toggleMember = (node: StorageNodeInfo) => {
     setMembers((previous) => previous.some((member) => member.storage_id === node.id)
       ? previous.filter((member) => member.storage_id !== node.id)
-      : [...previous, { storage_id: node.id, storage_mount: node.mount_path, download_path: '', archive_paths: [] }])
+      : [...previous, { storage_id: node.id, storage_mount: node.mount_path, download_path: '', archive_paths: [], priority: 0 }])
   }
 
   const updateMember = (index: number, change: Partial<MemberDraft>) => {
@@ -91,15 +86,20 @@ export function Storages() {
     event.preventDefault()
     if (!groupName.trim() || !members.length) { toast.warning('请输入分组名称，并至少选择一个存储节点'); return }
     if (members.some((member) => !member.storage_id)) { toast.warning('有旧挂载已无法匹配，请移除该成员后重新选择'); return }
+    if (members.some((member) => !Number.isInteger(member.priority) || member.priority < 0 || member.priority > 9999)) {
+      toast.warning('优先级须为 0～9999 的整数'); return
+    }
     setBusy(true)
     try {
       const payload = members.map((member) => ({
         storage_id: member.storage_id,
         download_path: normalizeStoragePath(member.download_path),
         archive_paths: member.archive_paths.map(normalizeStoragePath),
+        priority: member.priority,
       }))
       if (editingGroup) await storageService.updateGroup(editingGroup.id, { name: groupName.trim(), members: payload })
       else await storageService.createGroup(groupName.trim(), payload)
+      storageCache.invalidate()
       toast.success('分组与目录配置已保存')
       setGroupOpen(false)
       await loadData()
@@ -113,6 +113,7 @@ export function Storages() {
     setBusy(true)
     try {
       await storageService.deleteGroup(deletingGroup.id)
+      storageCache.invalidate()
       toast.success('分组已删除，媒体文件和扫描记录保留')
       setDeletingGroup(null)
       await loadData()
@@ -129,13 +130,32 @@ export function Storages() {
     setBusy(true)
     try {
       const updated = await storageService.overrideStorageSpace(quotaNode.id, bytes)
-      setStorages((previous) => previous.map((node) => node.id === updated.id ? updated : node))
+      storageCache.invalidate({
+        storages: storageCache.store.getState().storages.map((node) => node.id === updated.id ? updated : node),
+      })
+      void storageCache.refresh(true)
       if (updated.free_space === null) toast.warning(updated.space_error || '配额已保存，已用容量仍未知')
       else toast.success('存储配额已更新')
       setQuotaNode(null)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '保存配额失败')
     } finally { setBusy(false) }
+  }
+
+  const resetQuota = async () => {
+    if (!quotaNode) return
+    setBusy(true)
+    try {
+      const updated = await storageService.resetStorageSpace(quotaNode.id)
+      storageCache.invalidate({
+        storages: storageCache.store.getState().storages.map((node) => node.id === updated.id ? updated : node),
+      })
+      void storageCache.refresh(true)
+      if (updated.free_space === null) toast.warning(updated.space_error || '已恢复自动获取，原生容量暂时未知')
+      else toast.success('已恢复自动获取原生容量')
+      setQuotaNode(null)
+    } catch (error) { toast.error(error instanceof Error ? error.message : '恢复自动获取失败') }
+    finally { setBusy(false) }
   }
 
   return <div className="space-y-6">
@@ -150,6 +170,12 @@ export function Storages() {
         <FolderPlus className="h-4 w-4" />创建存储分组
       </Button>
     </PageHeader>
+
+    <div className="space-y-1 text-xs text-muted-foreground" aria-live="polite">
+      <p>{updatedAt ? '上次更新：' + formatDate(new Date(updatedAt).toISOString()) : '正在读取存储信息'}
+        {' · 任务结束、配置变更或手动刷新时更新'}</p>
+      {loadError && <p role="alert" className="text-destructive">{loadError}。已保留上次成功读取的信息。</p>}
+    </div>
 
     <div className="rounded-xl border bg-card p-4">
       <p className="text-sm text-muted-foreground">纳管存储剩余容量</p>
@@ -179,7 +205,10 @@ export function Storages() {
             </CardHeader>
             <CardContent className="space-y-3">
               {visible.map((member) => <div key={member.id} className="space-y-2 rounded-lg border bg-muted/30 p-3">
-                <p className="break-all font-mono text-sm font-semibold">{member.storage_mount}</p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="min-w-0 break-all font-mono text-sm font-semibold">{member.storage_mount}</p>
+                  <Badge variant="outline" className="shrink-0 font-mono">优先级 {member.priority}</Badge>
+                </div>
                 <div className="space-y-1 text-xs">
                   <p className="break-all"><span className="text-muted-foreground">下载：</span><span className="font-mono">{member.download_path}</span></p>
                   {member.archive_paths.map((path) => <p key={path} className="break-all"><span className="text-muted-foreground">归档：</span><span className="font-mono">{path}</span></p>)}
@@ -229,7 +258,7 @@ export function Storages() {
     <Dialog open={groupOpen} onOpenChange={(open) => { if (!busy) setGroupOpen(open) }}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto bg-card text-card-foreground sm:max-w-2xl">
         <DialogHeader><DialogTitle>{editingGroup ? '编辑存储分组' : '创建存储分组'}</DialogTitle>
-          <DialogDescription>勾选存储，再为每个成员选择目录。同一网盘可用于多个分组，查重覆盖组内下载与归档目录。</DialogDescription>
+          <DialogDescription>优先使用优先级最高且空间足够的节点，同优先级按最小剩余空间选择。查重覆盖组内下载与归档目录。</DialogDescription>
         </DialogHeader>
         <form onSubmit={saveGroup} className="space-y-5">
           <div className="space-y-1.5"><label htmlFor="group-name" className="text-sm font-medium">分组名称</label>
@@ -255,6 +284,13 @@ export function Storages() {
                   onClick={() => setMembers((previous) => previous.filter((_, position) => position !== index))}><Trash2 className="h-4 w-4" /></Button>
               </div>
               {!member.storage_id && <p className="text-sm text-destructive">此旧挂载未找到，请重新选择有效节点。</p>}
+              <div className="space-y-1.5">
+                <label htmlFor={'priority-' + index} className="text-sm font-medium">存储优先级</label>
+                <Input id={'priority-' + index} type="number" min={0} max={9999} step={1} required
+                  value={member.priority} onChange={(event) => updateMember(index, { priority: Number(event.target.value) })}
+                  className="min-h-[44px] font-mono sm:max-w-40" />
+                <p className="text-xs text-muted-foreground">0～9999，数值越大越优先；空间不足时使用下一节点。</p>
+              </div>
               <StorageDirectoryField label="下载目录" storageId={member.storage_id || null} mountPath={member.storage_mount}
                 value={member.download_path} onChange={(path) => updateMember(index, { download_path: path })} disabled={busy} />
               <div className="space-y-3">
@@ -297,7 +333,11 @@ export function Storages() {
         <form onSubmit={saveQuota} className="space-y-4">
           <label htmlFor="quota-gb" className="block text-sm font-medium">总容量（GB）</label>
           <Input id="quota-gb" type="number" min="0.001" step="any" value={quotaGb} onChange={(event) => setQuotaGb(event.target.value)} required disabled={busy} className="min-h-[44px] font-mono" />
-          <DialogFooter><Button type="button" variant="outline" className="min-h-[44px]" disabled={busy} onClick={() => setQuotaNode(null)}>取消</Button><Button type="submit" disabled={busy} className="min-h-[44px]">保存容量</Button></DialogFooter>
+          <DialogFooter className="gap-2">
+            {quotaNode?.space_source === 'manual' && <Button type="button" variant="outline" className="min-h-[44px] sm:mr-auto" disabled={busy} onClick={() => void resetQuota()}>恢复自动获取</Button>}
+            <Button type="button" variant="outline" className="min-h-[44px]" disabled={busy} onClick={() => setQuotaNode(null)}>取消</Button>
+            <Button type="submit" disabled={busy} className="min-h-[44px]">保存容量</Button>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>

@@ -1,5 +1,6 @@
 import { apiClient } from './client'
 import type { ApiResponse, SystemConfigData, ConnectionTestResult, BtParserConfig } from '@/types/api'
+import { storageCache } from '@/stores/storageStore'
 
 export const configService = {
   // 获取所有可编辑配置
@@ -11,6 +12,10 @@ export const configService = {
   // 局部更新配置
   async updateConfig(partialConfig: Partial<SystemConfigData>): Promise<SystemConfigData> {
     const res = await apiClient.put<ApiResponse<SystemConfigData>>('/config', partialConfig)
+    if (partialConfig.openlist || partialConfig.probe_paths) {
+      storageCache.invalidate({}, Boolean(partialConfig.openlist))
+      void storageCache.refresh(true)
+    }
     return res.data.data
   },
 

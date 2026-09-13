@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import DateTime, Float, Integer, String, Text, func
+from sqlalchemy import JSON, DateTime, Float, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -22,6 +22,7 @@ class DownloadTask(Base):
     task_id: Mapped[str] = mapped_column(String(36), unique=True, default=lambda: str(uuid.uuid4()), index=True)
     code: Mapped[str] = mapped_column(String(64), index=True)
     variant: Mapped[str] = mapped_column(String(16), default="original", server_default="original")
+    part_numbers: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
     magnet: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default=TaskStatus.pending.value, index=True)
     progress: Mapped[float] = mapped_column(Float, default=0.0)
