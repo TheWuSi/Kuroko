@@ -21,7 +21,7 @@ dev-frontend: ## 启动前端开发服务器
 	cd frontend && $(PNPM) dev
 
 dev: ## 同时启动前后端（需要 make -j2）
-	@echo "请使用 make -j2 dev-backend dev-frontend 同时启动前后端"
+	make -j2 dev-backend dev-frontend
 
 lint: ## 代码检查
 	cd backend && $(PYTHON) -m ruff check .
