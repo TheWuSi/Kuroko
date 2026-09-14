@@ -71,6 +71,54 @@ def metadata_parts(metadata: dict[str, Any], code: str, config: dict[str, Any]) 
     return sorted(parts) if parts and len(parts) <= 1000 else None
 
 
+def build_parse_result(original: str, parsed: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    """纯元数据处理不持有数据库连接，适合长耗时后台解析。"""
+    cleaned = clean_magnet(original)
+    dn_code = extract_code(magnet_display_name(cleaned), config["filter"].get("code_patterns", []))
+    valid, rejected = filter_files(parsed.get("files", []), config)
+    verified_code = (
+        next(
+            (
+                identity
+                for item in valid
+                if (
+                    identity := extract_media_code(
+                        str(PurePosixPath(parsed.get("name") or "") / item["name"]),
+                        config["filter"].get("code_patterns", []),
+                    )
+                )
+            ),
+            None,
+        )
+        or extract_code(parsed.get("name") or "", config["filter"].get("code_patterns", []))
+        or dn_code
+    )
+    variant = metadata_variant({**parsed, "files": valid}, verified_code, cleaned) if verified_code else "original"
+    parts = metadata_parts(parsed, verified_code, config) if verified_code else None
+    return {
+        "original_magnet": original,
+        "cleaned_magnet": cleaned,
+        "dn_code": dn_code,
+        "verified_code": verified_code,
+        "variant": variant,
+        "part_numbers": parts,
+        "total_files_count": len(valid) + len(rejected),
+        "total_size": parsed["size"],
+        "info_hash": parsed["info_hash"],
+        "files": valid,
+        "filtered_files": rejected,
+        "exists_in_library": False,
+        "duplicate_blocked": False,
+        "duplicate_allowed": False,
+        "existing_location": None,
+        "scope_group_ids": [],
+        "dedup_scope": "unselected",
+        "metadata_fallback": bool(parsed.get("metadata_fallback") or parsed.get("fallback")),
+        "fallback_reason": parsed.get("fallback_reason"),
+        "metadata_name": parsed.get("name") or None,
+    }
+
+
 def parse_magnets(
     db: Session,
     links: list[str],
@@ -88,64 +136,20 @@ def parse_magnets(
         results = []
         for original in links:
             cleaned = clean_magnet(original)
-            dn_code = extract_code(magnet_display_name(cleaned), config["filter"].get("code_patterns", []))
             parsed = parser.parse_with_fallback(cleaned)
-            valid, rejected = filter_files(parsed.get("files", []), config)
-            verified_code = (
-                next(
-                    (
-                        identity
-                        for item in valid
-                        if (identity := extract_media_code(
-                            str(PurePosixPath(parsed.get("name") or "") / item["name"]),
-                            config["filter"].get("code_patterns", []),
-                        ))
-                    ),
-                    None,
+            result = build_parse_result(original, parsed, config)
+            if result["verified_code"]:
+                result.update(
+                    duplicate_decision(
+                        db,
+                        result["verified_code"],
+                        result["variant"],
+                        part_numbers=result["part_numbers"],
+                        target_group=target_group,
+                        target_path=target_path,
+                    )
                 )
-                or extract_code(parsed.get("name") or "", config["filter"].get("code_patterns", []))
-                or dn_code
-            )
-            variant = (
-                metadata_variant({**parsed, "files": valid}, verified_code, cleaned) if verified_code else "original"
-            )
-            parts = metadata_parts(parsed, verified_code, config) if verified_code else None
-            decision = (
-                duplicate_decision(
-                    db,
-                    verified_code,
-                    variant,
-                    part_numbers=parts,
-                    target_group=target_group,
-                    target_path=target_path,
-                )
-                if verified_code
-                else {
-                    "exists_in_library": False,
-                    "duplicate_blocked": False,
-                    "duplicate_allowed": False,
-                    "existing_location": None,
-                }
-            )
-            results.append(
-                {
-                    "original_magnet": original,
-                    "cleaned_magnet": cleaned,
-                    "dn_code": dn_code,
-                    "verified_code": verified_code,
-                    "variant": variant,
-                    "part_numbers": parts,
-                    "total_files_count": len(valid) + len(rejected),
-                    "total_size": parsed["size"],
-                    "info_hash": parsed["info_hash"],
-                    "files": valid,
-                    "filtered_files": rejected,
-                    **decision,
-                    "metadata_fallback": bool(parsed.get("metadata_fallback") or parsed.get("fallback")),
-                    "fallback_reason": parsed.get("fallback_reason"),
-                    "metadata_name": parsed.get("name") or None,
-                }
-            )
+            results.append(result)
         return results
     finally:
         parser.close()

@@ -22,6 +22,11 @@ class TokenData(BaseModel):
     expires_at: datetime
 
 
+class SessionTokens(TokenData):
+    refresh_token: str
+    refresh_expires_at: datetime
+
+
 class UserOut(BaseModel):
     id: int
     username: str

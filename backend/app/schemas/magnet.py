@@ -1,4 +1,7 @@
-from pydantic import BaseModel, Field, field_validator
+from typing import Annotated
+from uuid import UUID
+
+from pydantic import BaseModel, Field, StrictInt, field_validator
 
 from app.schemas.code import CodeIdentity, CodeVariant, validate_code
 from app.utils.magnet_parser import clean_magnet
@@ -59,3 +62,27 @@ class DownloadRequest(TargetScope):
 
 class BatchDownloadRequest(BaseModel):
     tasks: list[DownloadRequest] = Field(min_length=1, max_length=100)
+
+
+class ParseJobRequest(MagnetParseRequest):
+    request_id: UUID
+
+
+ItemIndex = Annotated[StrictInt, Field(ge=0, le=99)]
+
+
+class ResumeParseRequest(BaseModel):
+    indices: list[ItemIndex] | None = Field(None, min_length=1, max_length=100)
+
+
+class SubmissionRequest(TargetScope):
+    request_id: UUID
+    item_indices: list[ItemIndex] = Field(min_length=1, max_length=100)
+    force: bool = False
+
+    @field_validator("item_indices")
+    @classmethod
+    def unique_indices(cls, value: list[int]) -> list[int]:
+        if len(set(value)) != len(value):
+            raise ValueError("提交条目不可重复")
+        return sorted(value)

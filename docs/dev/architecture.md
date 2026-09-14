@@ -98,34 +98,35 @@ backend/app/
 ### 2.2 核心服务协作流程
 
 #### 磁力解析、复核与去重流转图
+
 ```mermaid
 sequenceDiagram
-    autonumber
-    actor User as 用户 (前端界面)
-    participant API as Magnets 路由 (api/v1/magnets)
-    participant MagSvc as 磁力服务 (magnet_service)
-    participant BTClient as 元数据客户端 (magnet_metadata_client)
-    participant BTService as magnet-metadata-api (:8080)
-    participant DB as SQLite (CodeRecord 表)
-
-    User->>API: POST /api/v1/magnets/parse (链接列表)
-    API->>MagSvc: parse_magnets(db, links)
-    loop 遍历磁力链接
-        MagSvc->>MagSvc: clean_magnet (剔除 Tracker，提取 dn 初筛番号)
-        MagSvc->>BTClient: fetch_metadata(cleaned_magnet)
-        alt 服务正常且 DHT 命中
-            BTClient->>BTService: POST /api/v1/metadata
-            BTService-->>BTClient: 返回文件树 (path, size, offset)
-            MagSvc->>MagSvc: 过滤文件 (扩展名/体积/黑名单) 并提取深层番号
-        else 超时或服务异常
-            BTClient-->>MagSvc: 优雅降级 (使用 dn 候选番号，标记 fallback)
-        end
-        MagSvc->>DB: 查询番号是否已存在
-        DB-->>MagSvc: 返回存在记录或空
+    actor User as 用户
+    participant API as 磁力任务 API
+    participant DB as SQLite
+    participant Runner as 后台任务线程
+    participant BT as 元数据 API
+    User->>API: POST /magnets/parse-jobs（输入、请求编号）
+    API->>DB: 保存账号批次、逐条输入与过滤规则快照
+    API-->>User: HTTP 202，返回任务编号
+    loop 最多四条并发，每条独立处理
+        Runner->>DB: 短事务领取条目
+        Runner->>BT: 等待完整元数据响应（不持有数据库事务）
+        BT-->>Runner: 文件树或超时降级
+        Runner->>DB: 保存元数据确认 / 名称初筛 / 失败及摘要
     end
-    MagSvc-->>API: 组合返回两阶段解析结果与去重状态
-    API-->>User: HTTP 200 (前端渲染卡片与跳过/强制操作)
+    User->>API: 轮询批次状态，按需读取文件树
+    API-->>User: 进度、输入顺序及已完成结果
+    User->>API: 查重后创建 /parse-jobs/{id}/submissions
+    API->>DB: 保存完整批次关联、目标及提交请求编号
+    API-->>User: HTTP 202，返回提交编号
+    Runner->>DB: 逐条核对下载位置、记录占位并投递上游
+    Runner->>DB: 保存逐条提交结果
+    User->>API: 查询提交与账号最近记录
+    API-->>User: 成功 / 跳过 / 失败 / 待核实
 ```
+
+`magnet_jobs` 负责工作台的持久化流程，`magnet_service.build_parse_result` 复用原有过滤和番号识别规则；同步 `/magnets/parse` 与 `/magnets/batch-download` 保留兼容。提交仍由现有下载服务核实元数据、查重和验证目标，不信任浏览器传入的大小。
 
 ---
 
@@ -134,6 +135,10 @@ sequenceDiagram
 ### 3.1 技术栈与架构分层
 - **技术选型**：React 19 + TypeScript + Vite + Zustand + Shadcn/ui + Tailwind CSS (v4) + Axios。
 - **设计模式**：采用组件分层架构（`ui/` 原子组件、`common/` 复合组件、`features/` 领域组件、`layout/` 框架布局），通过 Zustand 实现单向数据流。
+
+前端会话协调器保存访问与刷新令牌，临近过期和 401 共用一次刷新；短暂网络错误不注销。账号切换递增会话版本，迟到响应不覆盖当前状态。旧版仅保存访问令牌的会话需要重新登录一次补齐刷新凭证。
+
+磁力草稿用独立的 Zustand store＋`localStorage` 按用户 ID 保存，包含输入修订号、关联条目索引及尚未确认的创建请求编号。每次输入即时保存，提交完成只移出同一修订草稿中的成功项；恢复历史先保存可撤销备份。账号变化只清内存，磁力草稿与存储展示缓存的清理相互独立。全局磁力任务跟踪不依赖页面挂载，运行时每两秒查询，失败退避到最多 30 秒。
 
 ### 3.2 美术设计方案 (Porcelain Tech 亮色优先)
 - **视觉风格**：现代高质感白瓷科技风（亮色优先，保留深色切换能力），底色采用温和的 `bg-slate-50`，卡片采用纯白 `bg-white` 配合精细微阴影 `shadow-sm shadow-slate-900/5` 与细腻边框 `border-slate-200/80`。
@@ -270,6 +275,10 @@ erDiagram
 启动通过 Alembic 升级到最新结构；完整的旧 `create_all` 数据库在无版本记录时自动标记 `0001_initial` 基线，包含版本表已存在但为空的情况。升级逐项检查已有表、列和索引，兼容旧进程提前创建新表或迁移部分执行的混合结构。SQLite 显式事务覆盖建表与数据变更，升级失败可整体回滚。`0002_library_scopes` 保留原下载目录，合并同分组同挂载的旧探测目录，归一化 FC2 与旧任务磁力的 URN，并建立忽略项、版本放行表及关键查询索引。旧成员无法离线推断真实存储 ID，暂存 null，界面按挂载匹配后在保存时绑定。`0003_storage_jobs_parts` 为旧成员补默认优先级 0，增加扫描范围快照、取消和目录进度字段，从已有 FC2 文件名回填分集，不改动真实媒体文件或撤销已有放行规则。旧客户端保存目录不会清空已有优先级。
 
 ---
+
+`0004_magnet_jobs` 新增 `magnet_parse_jobs`、`magnet_parse_items`、`magnet_submissions`、`magnet_submission_items`。按账号和请求编号唯一约束创建任务，请求内容不一致返回冲突；逐条保存原索引、结果及下载任务关联。状态摘要与完整文件树分开读取，最近记录分页返回，不自动清理已保存批次。
+
+服务生命周期管理四个解析线程和一个提交线程，沿用单进程部署约定。启动时把中断的解析条目重新排队，已停止的批次不自动继续；提交条目若已有上游任务编号则恢复成功，明确失败则恢复失败，其余正在提交的条目标记待核实，尚未开始的条目继续处理。下载占位和历史关联在同一事务保存；代次与运行标识阻止旧执行结果覆盖恢复后的状态。
 
 ## 5. 上游接入与任务边界
 

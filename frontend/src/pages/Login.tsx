@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { useNavigate, Link } from 'react-router'
+import { useNavigate, useLocation, Link } from 'react-router'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -7,12 +7,14 @@ import { Sparkles, KeyRound, User as UserIcon, Loader2, AlertCircle, ShieldAlert
 import { authService } from '@/services/auth.service'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/uiStore'
+import { loginReturnPath } from '@/lib/authSession'
 
 export function Login() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const navigate = useNavigate()
+  const location = useLocation()
   const { initialized, checkAuth } = useAuthStore()
 
   // 若检测到系统尚未完成初始化，自动引导进入初始化向导
@@ -39,8 +41,7 @@ export function Login() {
     try {
       await authService.login(trimmedUser, password)
       toast.success('登录成功')
-      await checkAuth()
-      navigate('/dashboard', { replace: true })
+      if (await checkAuth()) navigate(loginReturnPath(location.state?.from), { replace: true })
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '登录失败'
       toast.error(msg)

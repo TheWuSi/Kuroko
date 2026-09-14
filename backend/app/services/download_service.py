@@ -2,6 +2,7 @@
 
 import math
 import threading
+from collections.abc import Callable
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -85,13 +86,23 @@ def _same_magnet(left: str, info_hash: str) -> bool:
         return False
 
 
-def submit_batch(db: Session, tasks: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+def submit_batch(
+    db: Session,
+    tasks: list[dict[str, Any]],
+    *,
+    on_task_created: Callable[[DownloadTask], None] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
     # 单进程服务中串行完成查重与本地占位，避免两个浏览器请求同时穿过去重检查。
     with submit_lock:
-        return _submit_batch(db, tasks)
+        return _submit_batch(db, tasks, on_task_created=on_task_created)
 
 
-def _submit_batch(db: Session, tasks: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+def _submit_batch(
+    db: Session,
+    tasks: list[dict[str, Any]],
+    *,
+    on_task_created: Callable[[DownloadTask], None] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
     submitted, skipped, failed = [], [], []
     full_config = get_config(db, masked=False)
     config = full_config["bt_parser"]
@@ -199,6 +210,10 @@ def _submit_batch(db: Session, tasks: list[dict[str, Any]]) -> dict[str, list[di
                     code=code, variant=variant, part_numbers=parts, magnet=magnet, target_path=target, total_size=size
                 )
                 db.add(task)
+                if on_task_created is not None:
+                    db.flush()
+                    # 与下载占位在同一事务保存历史关联，重启后才能核实已发出的请求。
+                    on_task_created(task)
                 # 先确认本地能够保存任务，再执行不可回滚的上游提交；各条任务单独提交事务。
                 db.commit()
                 task.openlist_task_id = client.add_offline_download(magnet, target)

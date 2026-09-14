@@ -35,6 +35,92 @@ export interface LoginResponse {
   refresh_expires_at?: string
 }
 
+export type MagnetJobStatus = 'pending' | 'running' | 'completed' | 'cancelled'
+export type ParseItemStatus = 'pending' | 'running' | 'completed' | 'fallback' | 'failed'
+export type SubmissionItemStatus = 'pending' | 'running' | 'submitted' | 'skipped' | 'failed' | 'unknown'
+
+export interface MagnetJobSummary {
+  job_id: string
+  request_id: string
+  scope: TargetScope
+  status: MagnetJobStatus
+  cancel_requested: boolean
+  revision: number
+  total: number
+  completed: number
+  confirmed: number
+  fallback: number
+  failed: number
+  created_at: string
+  updated_at: string
+  finished_at: string | null
+}
+
+export interface MagnetJobItem {
+  index: number
+  magnet: string
+  status: ParseItemStatus
+  attempt: number
+  summary: Omit<MagnetParseItem, 'files' | 'filtered_files'> | null
+  error_message: string | null
+  started_at: string | null
+  finished_at: string | null
+}
+
+export interface SubmissionResult {
+  index: number
+  magnet: string
+  code: string
+  task_id?: string | null
+  reason?: string
+  message?: string
+  target_path?: string
+  existing_location?: string
+}
+
+export interface MagnetJobOutcome {
+  index: number
+  status: SubmissionItemStatus
+  result: SubmissionResult | null
+  submission_id: string
+  scope: TargetScope
+  task_id: string | null
+}
+
+export interface MagnetJob extends MagnetJobSummary {
+  items: MagnetJobItem[]
+  outcomes: MagnetJobOutcome[]
+}
+
+export interface MagnetSubmissionSummary {
+  submission_id: string
+  request_id: string
+  job_id: string
+  status: 'pending' | 'running' | 'completed'
+  scope: TargetScope
+  force: boolean
+  total: number
+  completed: number
+  submitted: number
+  skipped: number
+  failed: number
+  unknown: number
+  created_at: string
+  updated_at: string
+  finished_at: string | null
+}
+
+export interface MagnetSubmission extends MagnetSubmissionSummary {
+  input_links: string[]
+  items: Array<{
+    index: number
+    magnet: string
+    status: SubmissionItemStatus
+    task_id: string | null
+    result: SubmissionResult | null
+  }>
+}
+
 export interface SystemStatus {
   initialized: boolean
   authenticated: boolean

@@ -16,6 +16,7 @@ from app.core.responses import ApiError
 from app.core.spa import mount_spa
 from app.services.code_service import recover_orphaned_scans
 from app.services.download_service import sync_tasks, sync_transfer_revision
+from app.services.magnet_jobs import MagnetJobRunner
 
 
 def _sync_in_worker() -> None:
@@ -50,9 +51,12 @@ async def lifespan(_: FastAPI):
     finally:
         recovery_db.close()
     poller = asyncio.create_task(_task_poller())
+    magnet_runner = MagnetJobRunner()
+    magnet_runner.start()
     try:
         yield
     finally:
+        await asyncio.to_thread(magnet_runner.stop)
         poller.cancel()
         await asyncio.gather(poller, return_exceptions=True)
 

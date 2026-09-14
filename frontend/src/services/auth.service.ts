@@ -1,4 +1,4 @@
-import { apiClient, setStoredToken, removeStoredToken } from './client'
+import { apiClient, authSession, setStoredTokens, removeStoredToken } from './client'
 import type { ApiResponse, BootstrapStatus, LoginResponse, TokenData, User } from '@/types/api'
 
 export const authService = {
@@ -10,26 +10,28 @@ export const authService = {
 
   // 用户登录
   async login(username: string, password: string): Promise<LoginResponse> {
+    const epoch = authSession.getEpoch()
     const res = await apiClient.post<ApiResponse<LoginResponse>>('/auth/login', {
       username,
       password,
     })
     const data = res.data.data
     if (data.token) {
-      setStoredToken(data.token)
+      setStoredTokens(data, epoch)
     }
     return data
   },
 
   // 系统初始化（首次创建管理员账号）
   async bootstrap(username: string, password: string): Promise<TokenData> {
+    const epoch = authSession.getEpoch()
     const res = await apiClient.post<ApiResponse<TokenData>>('/auth/bootstrap', {
       username,
       password,
     })
     const data = res.data.data
     if (data.token) {
-      setStoredToken(data.token)
+      setStoredTokens(data, epoch)
     }
     return data
   },
@@ -45,4 +47,3 @@ export const authService = {
     removeStoredToken()
   },
 }
-

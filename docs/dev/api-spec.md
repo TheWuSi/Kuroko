@@ -95,7 +95,7 @@ HTTP 状态码相应为 `4xx` 或 `5xx`。
 ### 3.1 用户登录
 - **路径**：`POST /api/v1/auth/login`
 - **认证**：无需认证
-- **描述**：验证管理员用户名与密码，成功后签发 JWT Token。
+- **描述**：验证管理员用户名与密码，成功后签发访问令牌、刷新令牌及各自的过期时间。首次初始化 `POST /auth/bootstrap` 返回相同字段。
 
 #### 请求参数 (Body)
 | 字段 | 类型 | 必选 | 说明 |
@@ -121,7 +121,9 @@ curl -X POST "http://localhost:8000/api/v1/auth/login" \
   "data": {
     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
     "token_type": "Bearer",
-    "expires_at": "2026-09-07T19:56:26Z"
+    "expires_at": "2026-09-07T19:56:26Z",
+    "refresh_token": "<refresh-jwt>",
+    "refresh_expires_at": "2026-09-14T19:26:26Z"
   }
 }
 ```
@@ -139,16 +141,16 @@ curl -X POST "http://localhost:8000/api/v1/auth/login" \
 
 ### 3.2 刷新 Token
 - **路径**：`POST /api/v1/auth/refresh`
-- **认证**：需要 Bearer Token
-- **描述**：使用当前未完全失效的 JWT Token 换取新 Token，延长会话有效期。
+- **认证**：使用 `Authorization: Bearer <refresh_token>`，访问令牌不能用于此接口。
+- **描述**：使用有效刷新令牌换取新访问令牌；响应只包含访问令牌，客户端保留原刷新令牌及过期时间。默认访问令牌 30 分钟、刷新令牌 7 天，沿用环境配置。
 
 #### 请求参数
-无 Body，通过 Header 携带现有 Token。
+无 Body，通过 Header 携带刷新令牌。刷新凭证无效或过期返回 401；网络错误和 5xx 不代表会话失效。
 
 #### 请求示例
 ```bash
 curl -X POST "http://localhost:8000/api/v1/auth/refresh" \
-  -H "Authorization: Bearer <existing_jwt_token>"
+  -H "Authorization: Bearer <refresh_token>"
 ```
 
 #### 响应示例 (成功)
@@ -251,7 +253,7 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
 
 FC2 解析结果增加 `part_numbers`：完整媒体文件树中识别到的分集号集合，0 表示无后缀基础分集；其他番号或元数据／分集信息不明时为 null。文件名与作品目录共同提供身份，`CD001.mp4` 等单独分集名继承 FC2 作品目录。实际提交会重新从服务端元数据核实，不采信客户端伪造的分集号。
 
-前端最多并发四条单磁力请求，保持输入顺序，单条等待时间高于后端最高 300 秒解析超时，并支持 AbortSignal。
+此同步接口保留兼容。工作台使用下方持久化后台接口，整批不设总超时；元数据单次请求沿用配置（最高 300 秒），名称初筛不计为已确认元数据。
 
 ### 4.2 批量提交离线下载
 
@@ -325,6 +327,57 @@ FC2 解析结果增加 `part_numbers`：完整媒体文件树中识别到的分�
 ```
 
 `exists_in_library` 表示范围内有文件或活动任务；提交按钮按 `duplicate_blocked` 判断。已批准且尚未存在的其他版本可返回 `duplicate_allowed: true`。`dedup_scope` 为 `group/directory/unselected`；未选择位置时不作全库拦截。实际提交仍重新校验，不能以预检结果代替提交时查重。
+
+
+### 4.4 创建与恢复后台解析批次
+
+`POST /api/v1/magnets/parse-jobs`，需要访问令牌，成功返回 HTTP `202`。输入限制和 `TargetScope` 与 4.1 相同，增加必填 UUID `request_id`：
+
+```json
+{
+  "request_id": "11111111-1111-4111-8111-111111111111",
+  "magnet_links": ["magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=ABC-123"],
+  "target_path": "/drive/Video"
+}
+```
+
+同账号、同请求编号及内容返回原任务；编号复用但内容不同、或账号已有其他运行批次时返回 `409`。每账号同时运行一批，解析池最多四条并发。任务在响应后后台执行，每条结果独立保存，关闭页面或令牌过期不取消任务。
+
+| 接口 | 行为 |
+| --- | --- |
+| `GET /magnets/parse-jobs` | 当前账号批次，按创建时间倒序；`page` 默认 1，`page_size` 默认 20、最大 100；可用 `active=true` 或 UUID `request_id` 过滤 |
+| `GET /magnets/parse-jobs/{job_id}` | 批次进度、逐条摘要、关联提交状态 |
+| `GET /magnets/parse-jobs/{job_id}/items/{index}` | 按需读取完整解析结果；`index` 为原始零基索引，范围 0～99 |
+| `POST /magnets/parse-jobs/{job_id}/cancel` | 停止领取后续条目，已在等待的请求返回或单次超时后收尾，保留结果 |
+| `POST /magnets/parse-jobs/{job_id}/resume` | 请求体 `{}` 继续所有未完成、失败、名称初筛项；可传 `indices` 仅重试选中项，返回 `202` |
+
+批次摘要包含 `job_id/request_id/scope/status/cancel_requested/revision/total/completed/confirmed/fallback/failed/created_at/updated_at/finished_at`。批次 `status` 为 `pending/running/completed/cancelled`；`completed` 计已处理数量，`confirmed` 才表示已确认元数据。详情的 `items` 按原索引排序，每项含 `index/magnet/status/attempt/summary/error_message/started_at/finished_at`，条目状态为 `pending/running/completed/fallback/failed`。`summary` 为 4.1 的结果去掉 `files/filtered_files`；文件详情返回 `{index, attempt, status, result}`。
+
+详情 `outcomes` 保存各条目在各目标范围的最近提交状态，包含 `index/status/result/submission_id/scope/task_id`。恢复后仍须调用查重预检，不能把历史查重结论用于新的提交。所有批次与文件详情按账号隔离，读取他人记录返回 `404`。
+
+### 4.5 后台提交与最近记录
+
+`POST /api/v1/magnets/parse-jobs/{job_id}/submissions` 创建后台提交，成功返回 HTTP `202` 和提交详情：
+
+```json
+{
+  "request_id": "22222222-2222-4222-8222-222222222222",
+  "item_indices": [0],
+  "target_path": "/drive/Video",
+  "force": false
+}
+```
+
+`item_indices` 必填、1～100 个不重复的原始索引；只有已完成或名称初筛的条目可提交。批次须已完成或停止，目标目录或分组必填。服务端从已保存结果生成下载请求，逐条调用现有下载服务并保存结果。同账号同请求编号重试返回原提交；内容不一致返回 `409`。同一目标下仍在处理或待核实的同磁力提交不可重复投递，强制下载也不能绕过。
+
+| 接口 | 行为 |
+| --- | --- |
+| `GET /magnets/submissions` | 当前账号最近记录；分页参数与 4.4 相同，支持 `active` 和 `request_id` 过滤 |
+| `GET /magnets/submissions/{submission_id}` | 提交状态、完整原始批次输入、逐条提交结果 |
+
+提交摘要包含 `submission_id/request_id/job_id/scope/force/status/total/completed/submitted/skipped/failed/unknown/created_at/updated_at/finished_at`，状态为 `pending/running/completed`。详情另含 `input_links`（完整源批次）和 `items`（本次所选条目）：`index/magnet/status/task_id/result`。条目状态为 `pending/running/submitted/skipped/failed/unknown`；`result` 沿用 4.2 对应结果结构，索引固定为源批次索引。
+
+前端在提交结束后只移出确认成功的条目（含 `already_submitted`），保留重复跳过、失败、待核实和未提交项。记录按账号保存、不自动过期，恢复只回填输入和已保存结果。服务重启后核实已开始的提交，不能确认的保留 `unknown`，绝不自动重发；未开始的条目继续执行。
 
 ## 5. 模块 3: 下载与转存任务 (Tasks)
 

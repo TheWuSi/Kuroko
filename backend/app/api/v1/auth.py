@@ -5,9 +5,20 @@ from app.core.database import get_db
 from app.core.responses import success
 from app.core.security import create_token, get_current_user, get_refresh_user, hash_password, verify_password
 from app.models.user import User
-from app.schemas.auth import BootstrapStatus, Credentials, TokenData, UserOut
+from app.schemas.auth import BootstrapStatus, Credentials, SessionTokens, TokenData, UserOut
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
+
+
+def session_tokens(user: User) -> dict:
+    token, expires = create_token(user)
+    refresh_token, refresh_expires = create_token(user, refresh=True)
+    return SessionTokens(
+        token=token,
+        expires_at=expires,
+        refresh_token=refresh_token,
+        refresh_expires_at=refresh_expires,
+    ).model_dump(mode="json")
 
 
 @router.get("/bootstrap-status")
@@ -23,8 +34,7 @@ def bootstrap(payload: Credentials, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
-    token, expires = create_token(user)
-    return success(TokenData(token=token, expires_at=expires).model_dump(mode="json"))
+    return success(session_tokens(user))
 
 
 @router.post("/login")
@@ -32,17 +42,7 @@ def login(payload: Credentials, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == payload.username.strip()).first()
     if user is None or not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
-    token, expires = create_token(user)
-    refresh, refresh_expires = create_token(user, refresh=True)
-    return success(
-        {
-            "token": token,
-            "refresh_token": refresh,
-            "token_type": "Bearer",
-            "expires_at": expires.isoformat(),
-            "refresh_expires_at": refresh_expires.isoformat(),
-        }
-    )
+    return success(session_tokens(user))
 
 
 @router.post("/refresh")
