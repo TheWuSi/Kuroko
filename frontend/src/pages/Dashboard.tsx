@@ -84,12 +84,12 @@ export function Dashboard() {
           size="sm"
           onClick={() => loadData(true)}
           disabled={refreshing}
-          className="gap-2 min-h-[44px] sm:min-h-[36px]"
+          className="gap-2 min-h-11 sm:min-h-9"
         >
           <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
           刷新数据
         </Button>
-        <Button asChild size="sm" className="gap-2 min-h-[44px] sm:min-h-[36px]">
+        <Button asChild size="sm" className="gap-2 min-h-11 sm:min-h-9">
           <Link to="/magnets">
             <Plus className="h-4 w-4" />
             解析新磁力
@@ -217,7 +217,7 @@ export function Dashboard() {
 
                       <div className="space-y-1">
                         <div className="flex justify-between text-[11px] text-slate-400 font-mono">
-                          <span className="truncate max-w-[200px] sm:max-w-md">
+                          <span className="truncate max-w-50 sm:max-w-md">
                             📁 {task.target_path}
                           </span>
                           <span>{task.progress.toFixed(1)}%</span>
@@ -228,7 +228,7 @@ export function Dashboard() {
                   ))}
 
                   <div className="pt-2 text-center">
-                    <Button asChild variant="ghost" size="sm" className="text-xs text-blue-600 gap-1 min-h-[44px] sm:min-h-[36px]">
+                    <Button asChild variant="ghost" size="sm" className="text-xs text-blue-600 gap-1 min-h-11 sm:min-h-9">
                       <Link to="/tasks">
                         前往完整任务管理列表
                         <ArrowRight className="h-3.5 w-3.5" />
@@ -292,7 +292,7 @@ export function Dashboard() {
                         <div className="flex items-center justify-between">
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <span className="font-semibold text-slate-800 truncate max-w-[160px] cursor-help">
+                              <span className="font-semibold text-slate-800 truncate max-w-40 cursor-help">
                                 {node.mount_path}
                               </span>
                             </TooltipTrigger>

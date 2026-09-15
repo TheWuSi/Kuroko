@@ -212,7 +212,7 @@ export function Settings() {
         title="系统参数配置"
         description="维护 OpenList 聚合连接、BT 元数据解析服务与内容过滤规则"
       >
-        <Button onClick={handleSave} disabled={saving} className="gap-2 min-h-[44px] sm:min-h-[36px]">
+        <Button onClick={handleSave} disabled={saving} className="gap-2 min-h-11 sm:min-h-9">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           保存全部配置
         </Button>
@@ -363,7 +363,7 @@ export function Settings() {
                     size="sm"
                     onClick={handleTestOpenList}
                     disabled={testingOpenList}
-                    className="gap-2 min-h-[44px] sm:min-h-[36px]"
+                    className="gap-2 min-h-11 sm:min-h-9"
                   >
                     {testingOpenList ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -438,7 +438,7 @@ export function Settings() {
                     maxLength={8192}
                     value={config.bt_parser.token ?? ''}
                     onChange={(event) => setConfig({ ...config, bt_parser: { ...config.bt_parser, token: event.target.value } })}
-                    className="min-h-[44px] font-mono text-sm"
+                    className="min-h-11 font-mono text-sm"
                   />
                   <p className="text-xs text-muted-foreground">直接部署的 magnet-metadata-api 无需令牌；仅在认证代理要求时填写。</p>
                 </div>
@@ -470,7 +470,7 @@ export function Settings() {
                     size="sm"
                     onClick={handleTestBtParser}
                     disabled={testingBt}
-                    className="gap-2 min-h-[44px] sm:min-h-[36px]"
+                    className="gap-2 min-h-11 sm:min-h-9"
                   >
                     {testingBt ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -502,7 +502,7 @@ export function Settings() {
                   <label className="text-xs font-semibold text-slate-700 block">
                     允许的视频扩展名白名单
                   </label>
-                  <div className="flex flex-wrap gap-1.5 p-2 rounded-lg border border-slate-200 bg-slate-50/50 min-h-[44px] items-center">
+                  <div className="flex flex-wrap gap-1.5 p-2 rounded-lg border border-slate-200 bg-slate-50/50 min-h-11 items-center">
                     {config.filter.allowed_extensions.map((ext) => (
                       <Badge
                         key={ext}
@@ -538,7 +538,7 @@ export function Settings() {
                       variant="secondary"
                       size="sm"
                       onClick={handleAddExt}
-                      className="min-h-[44px] sm:min-h-[36px]"
+                      className="min-h-11 sm:min-h-9"
                     >
                       <Plus className="h-3.5 w-3.5 mr-1" />
                       添加
@@ -613,7 +613,7 @@ export function Settings() {
                       variant="secondary"
                       size="sm"
                       onClick={handleAddBlacklist}
-                      className="min-h-[44px] sm:min-h-[36px]"
+                      className="min-h-11 sm:min-h-9"
                     >
                       <Plus className="h-3.5 w-3.5 mr-1" />
                       添加正则

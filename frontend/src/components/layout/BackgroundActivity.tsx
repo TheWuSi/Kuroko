@@ -66,7 +66,7 @@ export function BackgroundActivity() {
         <p className="text-xs text-muted-foreground">{error || '后台持续运行，可切换页面或刷新浏览器。'}</p>
       </div>
     </div>
-    <Button asChild variant="outline" className="min-h-[44px] shrink-0">
+    <Button asChild variant="outline" className="min-h-11 shrink-0">
       <Link to="/codes" onClick={() => useScanStore.setState({ panelOpen: true })}>查看扫描</Link>
     </Button>
   </div>

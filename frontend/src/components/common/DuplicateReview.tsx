@@ -71,10 +71,10 @@ export function DuplicateReview({ groupId, refreshVersion }: { groupId?: number;
     <CardContent>
       <Tabs defaultValue="duplicates" className="space-y-4">
         <TabsList className="grid h-auto w-full grid-cols-2 sm:w-fit">
-          <TabsTrigger value="duplicates" className="min-h-[44px]">待处理重复（{total}）</TabsTrigger>
-          <TabsTrigger value="rules" className="min-h-[44px]">已允许组合（{rules.length}）</TabsTrigger>
+          <TabsTrigger value="duplicates" className="min-h-11">待处理重复（{total}）</TabsTrigger>
+          <TabsTrigger value="rules" className="min-h-11">已允许组合（{rules.length}）</TabsTrigger>
         </TabsList>
-        {error && <p role="alert" className="text-sm text-destructive">{error}<Button variant="ghost" className="min-h-[44px]" onClick={() => setVersion((value) => value + 1)}>重试</Button></p>}
+        {error && <p role="alert" className="text-sm text-destructive">{error}<Button variant="ghost" className="min-h-11" onClick={() => setVersion((value) => value + 1)}>重试</Button></p>}
         {loading && <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />核对索引中…</p>}
         <TabsContent value="duplicates" className="space-y-3">
           {!loading && !error && !total && <p className="text-sm text-muted-foreground">当前索引中没有待处理的组内重复。扫描目录后会自动更新。</p>}
@@ -88,7 +88,7 @@ export function DuplicateReview({ groupId, refreshVersion }: { groupId?: number;
                   <Badge variant="outline">{item.group_name}</Badge>
                   <Badge variant="warning">{item.files.length} 份文件</Badge>
                 </div>
-                <Button variant="outline" className="min-h-[44px] shrink-0 gap-2 self-end"
+                <Button variant="outline" className="min-h-11 shrink-0 gap-2 self-end"
                   disabled={!item.can_ignore || saving || loading}
                   aria-label={'允许 ' + item.code + ' 的版本共存'}
                   onClick={() => void allow(item)}>
@@ -118,9 +118,9 @@ export function DuplicateReview({ groupId, refreshVersion }: { groupId?: number;
             </div>
           })}
           {total > 30 && <div className="flex items-center justify-center gap-3">
-            <Button variant="outline" disabled={page <= 1 || loading} className="min-h-[44px]" onClick={() => setPage((value) => value - 1)}>上一页</Button>
+            <Button variant="outline" disabled={page <= 1 || loading} className="min-h-11" onClick={() => setPage((value) => value - 1)}>上一页</Button>
             <span className="font-mono text-xs">{page} / {Math.ceil(total / 30)}</span>
-            <Button variant="outline" disabled={page * 30 >= total || loading} className="min-h-[44px]" onClick={() => setPage((value) => value + 1)}>下一页</Button>
+            <Button variant="outline" disabled={page * 30 >= total || loading} className="min-h-11" onClick={() => setPage((value) => value + 1)}>下一页</Button>
           </div>}
         </TabsContent>
         <TabsContent value="rules" className="space-y-3">
@@ -129,7 +129,7 @@ export function DuplicateReview({ groupId, refreshVersion }: { groupId?: number;
             <div className="space-y-1"><p className="font-mono text-sm font-semibold">{rule.code}</p>
               <p className="text-xs text-muted-foreground">{rule.group_name} · {rule.variants.map(variantLabel).join('、')} · {rule.code.startsWith('FC2-') ? '每个版本的各分集一份' : '各一份'}</p>
             </div>
-            <Button variant="outline" disabled={busy.has('rule:' + rule.id) || loading} className="min-h-[44px] shrink-0 gap-2" onClick={() => void revoke(rule.id)}><Undo2 className="h-4 w-4" />撤销允许</Button>
+            <Button variant="outline" disabled={busy.has('rule:' + rule.id) || loading} className="min-h-11 shrink-0 gap-2" onClick={() => void revoke(rule.id)}><Undo2 className="h-4 w-4" />撤销允许</Button>
           </div>)}
         </TabsContent>
       </Tabs>

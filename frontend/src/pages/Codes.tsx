@@ -173,7 +173,7 @@ export function Codes() {
         title="番号媒体库归档"
         description="扫描下载与归档目录确认实际文件，统计随分组和搜索条件更新"
       >
-        <Button variant="outline" className="min-h-[44px] gap-2" disabled={loading} onClick={() => setRefreshVersion((value) => value + 1)}>
+        <Button variant="outline" className="min-h-11 gap-2" disabled={loading} onClick={() => setRefreshVersion((value) => value + 1)}>
           <RefreshCw className={loading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />刷新
         </Button>
         <Button
@@ -181,7 +181,7 @@ export function Codes() {
             setScanOpen(true)
             setSelectedScanGroup(selectedGroup)
           }}
-          className="gap-2 bg-blue-600 hover:bg-blue-700 min-h-[44px] sm:min-h-[36px]"
+          className="gap-2 bg-blue-600 hover:bg-blue-700 min-h-11 sm:min-h-9"
         >
           <Radar className="h-4 w-4" />
           {scanning ? '查看扫描进度' : '定向探测扫描'}
@@ -214,7 +214,7 @@ export function Codes() {
         </div>
         <select aria-label="媒体库分组筛选" value={selectedGroup ?? ''}
           onChange={(event) => { setSelectedGroup(event.target.value ? Number(event.target.value) : undefined); setPage(1) }}
-          className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 text-sm sm:w-auto">
+          className="min-h-11 w-full rounded-md border border-input bg-background px-3 text-sm sm:w-auto">
           <option value="">全部媒体记录</option>
           {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
         </select>
@@ -267,7 +267,7 @@ export function Codes() {
                         <button
                           type="button"
                           onClick={() => handleCopy(item.code, item.code, '番号')}
-                          className="min-h-[44px] min-w-[44px] p-2 text-muted-foreground hover:text-foreground rounded-md hover:bg-muted cursor-pointer"
+                          className="min-h-11 min-w-11 p-2 text-muted-foreground hover:text-foreground rounded-md hover:bg-muted cursor-pointer"
                         >
                           {copiedCode === item.code ? (
                             <Check className="h-3.5 w-3.5 text-emerald-600" />
@@ -283,7 +283,7 @@ export function Codes() {
                       <DropdownMenuTrigger asChild>
                         <button
                           type="button"
-                          className="min-h-[44px] min-w-[44px] p-2 text-muted-foreground hover:text-foreground rounded-md hover:bg-muted cursor-pointer"
+                          className="min-h-11 min-w-11 p-2 text-muted-foreground hover:text-foreground rounded-md hover:bg-muted cursor-pointer"
                         >
                           <MoreVertical className="h-3.5 w-3.5" />
                         </button>
@@ -364,7 +364,7 @@ export function Codes() {
             size="sm"
             disabled={page <= 1 || loading}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
-            className="min-h-[44px] sm:min-h-[36px]"
+            className="min-h-11 sm:min-h-9"
           >
             上一页
           </Button>
@@ -376,7 +376,7 @@ export function Codes() {
             size="sm"
             disabled={page >= Math.ceil(total / 24) || loading}
             onClick={() => setPage((p) => p + 1)}
-            className="min-h-[44px] sm:min-h-[36px]"
+            className="min-h-11 sm:min-h-9"
           >
             下一页
           </Button>
@@ -422,7 +422,7 @@ export function Codes() {
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-medium">本次扫描目录</p>
-                <Button asChild variant="outline" className="min-h-[44px]"><Link to="/storages">配置目录</Link></Button>
+                <Button asChild variant="outline" className="min-h-11"><Link to="/storages">配置目录</Link></Button>
               </div>
               {pathsLoading && <p className="text-sm text-muted-foreground">加载扫描范围…</p>}
               {pathsError && <p role="alert" className="text-sm text-destructive">{pathsError}</p>}
@@ -436,7 +436,7 @@ export function Codes() {
             {!isScanActive(scanStatus) && <Button
               onClick={handleStartScan}
               disabled={scanning || pathsLoading || !scanPaths.length || Boolean(pathsError)}
-              className="w-full min-h-[44px] text-base font-semibold gap-2"
+              className="w-full min-h-11 text-base font-semibold gap-2"
             >
               {scanning ? (
                 <>

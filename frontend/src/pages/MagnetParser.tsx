@@ -209,14 +209,14 @@ export function MagnetParser() {
         </CardHeader>
         <CardContent className="space-y-4">
           <Textarea aria-label="磁力链接，每行一条" placeholder="粘贴磁力链接，每行一条，最多 100 条" value={inputText}
-            maxLength={MAX_DRAFT_LENGTH} onChange={handleInputChange} className="min-h-[160px] font-mono text-xs leading-relaxed" />
+            maxLength={MAX_DRAFT_LENGTH} onChange={handleInputChange} className="min-h-40 font-mono text-xs leading-relaxed" />
           <div className="space-y-4 rounded-lg border p-3 sm:p-4">
             <fieldset className="flex flex-wrap gap-x-5 gap-y-2" disabled={submitting || parsing}>
               <legend className="mb-2 text-sm font-medium">下载位置</legend>
-              <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm">
+              <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
                 <input type="radio" name="target-mode" checked={targetMode === 'direct'} onChange={() => setTargetMode('direct')} />选择 OpenList 存储与目录
               </label>
-              <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm">
+              <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
                 <input type="radio" name="target-mode" checked={targetMode === 'group'} onChange={() => setTargetMode('group')} />分组自动选盘
               </label>
             </fieldset>
@@ -224,7 +224,7 @@ export function MagnetParser() {
               <div className="space-y-1.5">
                 <label htmlFor="download-storage" className="text-sm font-medium">OpenList 存储</label>
                 <select id="download-storage" value={selectedStorage} disabled={submitting || parsing}
-                  className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 font-mono text-sm"
+                  className="min-h-11 w-full rounded-md border border-input bg-background px-3 font-mono text-sm"
                   onChange={(event) => { setSelectedStorage(event.target.value); setTargetPath('') }}>
                   <option value="">{storages.length ? '请选择挂载存储' : '暂无可用挂载，请检查连接与忽略项'}</option>
                   {storages.map((node) => <option key={node.id} value={node.id} disabled={node.status !== 'work'}>{node.mount_path} · {node.driver}{node.status !== 'work' ? '（不可用）' : ''}</option>)}
@@ -233,7 +233,7 @@ export function MagnetParser() {
               {currentStorage && groups.some((group) => group.members.some((member) => member.storage_id === currentStorage.id || member.storage_mount === currentStorage.mount_path)) && <div className="space-y-1.5">
                 <label htmlFor="saved-download-path" className="text-sm font-medium">使用分组中已配置的下载目录</label>
                 <select id="saved-download-path" value="" onChange={(event) => setTargetPath(event.target.value)} disabled={submitting || parsing}
-                  className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 text-sm">
+                  className="min-h-11 w-full rounded-md border border-input bg-background px-3 text-sm">
                   <option value="">选择常用目录…</option>
                   {groups.flatMap((group) => group.members.filter((member) => member.storage_id === currentStorage.id || member.storage_mount === currentStorage.mount_path)
                     .map((member) => <option key={group.id + '-' + member.id} value={member.download_path}>{group.name} · {member.download_path}</option>))}
@@ -245,7 +245,7 @@ export function MagnetParser() {
             </div> : <div className="space-y-1.5">
               <label htmlFor="download-group" className="text-sm font-medium">存储分组</label>
               <select id="download-group" value={selectedGroup} disabled={submitting || parsing} onChange={(event) => setSelectedGroup(event.target.value)}
-                className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 text-sm">
+                className="min-h-11 w-full rounded-md border border-input bg-background px-3 text-sm">
                 <option value="">{groups.length ? '请选择分组' : '请先在存储页面创建分组'}</option>
                 {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
               </select>
@@ -257,11 +257,11 @@ export function MagnetParser() {
             </p>}
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            {backup && <Button variant="ghost" className="min-h-[44px] gap-1" onClick={() => {
+            {backup && <Button variant="ghost" className="min-h-11 gap-1" onClick={() => {
               if (magnetDraft.undo()) { void refreshMagnets(); toast.info('已撤销恢复，找回原草稿') }
             }}><Undo2 className="h-4 w-4" />撤销恢复</Button>}
-            {inputText && <Button variant="ghost" className="min-h-[44px]" onClick={() => { updateMagnetDraft({ text: '' }); setCleanedBadge(null) }}>清空</Button>}
-            <Button onClick={handleParse} disabled={state.starting || state.jobs.some(isMagnetActive) || parsing || !inputText.trim()} className="min-h-[44px] gap-2">
+            {inputText && <Button variant="ghost" className="min-h-11" onClick={() => { updateMagnetDraft({ text: '' }); setCleanedBadge(null) }}>清空</Button>}
+            <Button onClick={handleParse} disabled={state.starting || state.jobs.some(isMagnetActive) || parsing || !inputText.trim()} className="min-h-11 gap-2">
               {state.starting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
               {state.starting ? '正在创建解析任务…' : '开始解析'}
             </Button>
@@ -277,9 +277,9 @@ export function MagnetParser() {
             <p className="text-xs text-muted-foreground">已确认元数据 {job.confirmed} 条 · 名称初筛 {job.fallback} 条 · 失败 {job.failed} 条 · 已用 {Math.floor(elapsed / 60)} 分 {elapsed % 60} 秒</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {!bound && <Button variant="outline" className="min-h-[44px]" onClick={() => void run(() => restore(job.job_id, job.scope))}>恢复此批输入</Button>}
-            {parsing ? <Button variant="outline" className="min-h-[44px]" disabled={state.changing || job.cancel_requested}
-              onClick={() => void run(() => changeMagnetParse('cancel'))}>停止解析</Button> : retryable && <Button variant="outline" className="min-h-[44px]"
+            {!bound && <Button variant="outline" className="min-h-11" onClick={() => void run(() => restore(job.job_id, job.scope))}>恢复此批输入</Button>}
+            {parsing ? <Button variant="outline" className="min-h-11" disabled={state.changing || job.cancel_requested}
+              onClick={() => void run(() => changeMagnetParse('cancel'))}>停止解析</Button> : retryable && <Button variant="outline" className="min-h-11"
                 disabled={state.changing || submitting} onClick={() => void run(() => changeMagnetParse('resume'))}>继续未完成 / 重试失败项</Button>}
           </div>
         </div>
@@ -294,22 +294,22 @@ export function MagnetParser() {
           <p className="text-xs text-muted-foreground">按账号保存完整批次，点击恢复输入；已提交和待核实的状态会保留。</p>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="max-h-[440px] space-y-2 overflow-y-auto">
+          <div className="max-h-110 space-y-2 overflow-y-auto">
             {history.map((record) => <div key={record.submission_id} className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0 text-sm">
                 <p className="font-medium">{dateLabel(record.created_at)} · {record.total} 条{isMagnetActive(record) ? ' · 提交中' : ''}</p>
                 <p className="text-xs text-muted-foreground">已提交 {record.submitted} · 跳过 {record.skipped} · 失败 {record.failed} · 待核实 {record.unknown}</p>
                 <p className="break-all font-mono text-xs text-muted-foreground">{record.scope.target_path || `分组 ${record.scope.target_group}`}</p>
               </div>
-              <Button variant="outline" className="min-h-[44px] shrink-0" onClick={() => void run(() => restore(record.job_id, record.scope))}>恢复输入</Button>
+              <Button variant="outline" className="min-h-11 shrink-0" onClick={() => void run(() => restore(record.job_id, record.scope))}>恢复输入</Button>
             </div>)}
           </div>
-          {history.length < historyTotal && <Button variant="ghost" className="min-h-[44px]" disabled={loadingHistory} onClick={() => void run(loadMoreMagnetHistory)}>加载更多记录</Button>}
+          {history.length < historyTotal && <Button variant="ghost" className="min-h-11" disabled={loadingHistory} onClick={() => void run(loadMoreMagnetHistory)}>加载更多记录</Button>}
           {state.jobs.length > 0 && <details className="rounded-md border px-3">
-            <summary className="flex min-h-[44px] cursor-pointer items-center text-sm">最近解析批次（含未提交的批次）</summary>
+            <summary className="flex min-h-11 cursor-pointer items-center text-sm">最近解析批次（含未提交的批次）</summary>
             <div className="space-y-2 pb-3">{state.jobs.map((record) => <div key={record.job_id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
               <span>{dateLabel(record.created_at)} · {record.completed}/{record.total} 条{isMagnetActive(record) ? ' · 解析中' : ''}</span>
-              <Button variant="ghost" className="min-h-[44px]" onClick={() => void run(() => restore(record.job_id, record.scope))}>恢复该批次</Button>
+              <Button variant="ghost" className="min-h-11" onClick={() => void run(() => restore(record.job_id, record.scope))}>恢复该批次</Button>
             </div>)}</div>
           </details>}
         </CardContent>
@@ -317,13 +317,13 @@ export function MagnetParser() {
 
       {submissionRequest && !submissionRequest.submissionId && !state.submitting && submissionRequest.jobId === job?.job_id && <div role="status" className="flex flex-wrap items-center gap-3 rounded-lg border p-3 text-sm">
         <span>正在核实上一次提交是否已受理，草稿已保留。</span>
-        <Button variant="outline" className="min-h-[44px]" onClick={() => void run(() => submitMagnetItems(submissionRequest.indices, submissionRequest.scope, submissionRequest.force))}>重试确认提交</Button>
+        <Button variant="outline" className="min-h-11" onClick={() => void run(() => submitMagnetItems(submissionRequest.indices, submissionRequest.scope, submissionRequest.force))}>重试确认提交</Button>
       </div>}
       {bound && job!.items.some((item) => item.status === 'failed') && <Card><CardContent className="space-y-3 p-4">
         <p className="text-sm font-medium">解析失败，输入已保留</p>
         {job!.items.filter((item) => item.status === 'failed').map((item) => <p key={item.index} className="text-sm text-destructive">第 {item.index + 1} 行：{item.error_message}</p>)}
         <p className="text-xs text-muted-foreground">请先确认元数据服务地址与健康状态，再重试失败项；已确认的条目不会被重复请求。</p>
-        {!parsing && <Button variant="outline" className="min-h-[44px] gap-1" disabled={state.changing}
+        {!parsing && <Button variant="outline" className="min-h-11 gap-1" disabled={state.changing}
           onClick={() => void run(() => changeMagnetParse('resume', job!.items.filter((item) => item.status === 'failed').map((item) => item.index)))}>
           <RotateCcw className="h-4 w-4" />仅重试失败项（{job!.items.filter((item) => item.status === 'failed').length}）
         </Button>}
@@ -336,13 +336,13 @@ export function MagnetParser() {
             {existingCount > 0 && <p className="text-xs text-muted-foreground">重复项已置顶显示；批次结束后默认从输入框移除，可在解析结果中继续强制下载。</p>}
           </div>
           {downloadable.length > 0 && <Button onClick={() => submitItems(downloadable.map((item) => item.index), false)}
-            disabled={submitting || Boolean(submissionRequest) || parsing || !targetReady || checking || Boolean(checkError)} className="min-h-[44px] gap-2">
+            disabled={submitting || Boolean(submissionRequest) || parsing || !targetReady || checking || Boolean(checkError)} className="min-h-11 gap-2">
             {submitting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             {submitting ? '后台提交中…' : `提交可下载项（${downloadable.length}）`}
           </Button>}
         </div>
         {checkError && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive"><span>{checkError}</span>
-          <Button variant="outline" className="min-h-[44px]" onClick={() => setCheckVersion((value) => value + 1)}>重试查重</Button>
+          <Button variant="outline" className="min-h-11" onClick={() => setCheckVersion((value) => value + 1)}>重试查重</Button>
         </div>}
         {orderedResults.map((item) => {
           const outcome = outcomes.get(item.index)
@@ -361,14 +361,14 @@ export function MagnetParser() {
                 {item.retry_at && <Badge variant="outline"><RotateCcw className="mr-1 h-3.5 w-3.5" />等待重试</Badge>}
               </div>
               <div className="flex gap-2">
-                <Button variant="ghost" size="sm" className="min-h-[44px] gap-1" onClick={() => void handleCopy(item.cleaned_magnet, item.index)}>
+                <Button variant="ghost" size="sm" className="min-h-11 gap-1" onClick={() => void handleCopy(item.cleaned_magnet, item.index)}>
                   {copiedIndex === item.index ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}复制磁力
                 </Button>
-                {bound && <Button variant="ghost" size="sm" className="min-h-[44px] gap-1" disabled={parsing || savingCode === item.index}
+                {bound && <Button variant="ghost" size="sm" className="min-h-11 gap-1" disabled={parsing || savingCode === item.index}
                   onClick={() => setEditing(editing?.index === item.index ? null : { index: item.index, value: item.verified_code || item.dn_code || '' })}>
                   <Pencil className="h-4 w-4" />改番号
                 </Button>}
-                {item.duplicate_blocked && !blocked(outcome) && <Button variant="outline" size="sm" className="min-h-[44px]"
+                {item.duplicate_blocked && !blocked(outcome) && <Button variant="outline" size="sm" className="min-h-11"
                   disabled={submitting || Boolean(submissionRequest) || parsing || checking || !targetReady || Boolean(checkError)} onClick={() => submitItems([item.index], true)}>强制下载此版</Button>}
               </div>
             </div>
@@ -381,13 +381,13 @@ export function MagnetParser() {
                   onChange={(event) => setEditing({ index: item.index, value: event.target.value })}
                   onKeyDown={(event) => { if (event.key === 'Enter') void saveManualCode(item.index) }}
                   placeholder="例如 300MIUM-777"
-                  className="min-h-[44px] min-w-0 flex-1 rounded-md border border-input bg-background px-3 font-mono text-sm" />
-                <Button className="min-h-[44px]" disabled={savingCode === item.index} onClick={() => void saveManualCode(item.index)}>
+                  className="min-h-11 min-w-0 flex-1 rounded-md border border-input bg-background px-3 font-mono text-sm" />
+                <Button className="min-h-11" disabled={savingCode === item.index} onClick={() => void saveManualCode(item.index)}>
                   {savingCode === item.index ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}保存
                 </Button>
-                {item.manual_code != null && <Button variant="outline" className="min-h-[44px]" disabled={savingCode === item.index}
+                {item.manual_code != null && <Button variant="outline" className="min-h-11" disabled={savingCode === item.index}
                   onClick={() => void resetManualCode(item.index)}>恢复自动识别</Button>}
-                <Button variant="ghost" className="min-h-[44px]" onClick={() => setEditing(null)}>取消</Button>
+                <Button variant="ghost" className="min-h-11" onClick={() => setEditing(null)}>取消</Button>
               </div>
             </div>}
             {item.manual_code != null && editing?.index !== item.index && <p className="text-xs text-muted-foreground">

@@ -65,7 +65,7 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void }) {
               onClick={onNavigate}
               className={({ isActive }) =>
                 cn(
-                  'flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all min-h-[44px]',
+                  'flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all min-h-11',
                   isActive
                     ? 'bg-blue-50 text-blue-600 font-semibold shadow-xs'
                     : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
@@ -85,7 +85,7 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void }) {
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="w-full flex items-center justify-between p-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer text-left focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 min-h-[44px]"
+              className="w-full flex items-center justify-between p-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer text-left focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 min-h-11"
             >
               <div className="flex items-center gap-2.5 min-w-0">
                 <Avatar className="h-8 w-8 rounded-lg bg-blue-100 text-blue-700 font-bold border border-blue-200 shrink-0">

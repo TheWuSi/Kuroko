@@ -24,7 +24,7 @@ export function LazyMagnetFiles({ jobId, index, attempt }: { jobId: string; inde
   }, [jobId, index, attempt, requested])
   if (result) return <FileTree files={result.files} filteredFiles={result.filtered_files} defaultOpen />
   return <div className="space-y-1">
-    <Button variant="ghost" className="min-h-[44px]" disabled={loading} onClick={() => setRequested((value) => value + 1)}>
+    <Button variant="ghost" className="min-h-11" disabled={loading} onClick={() => setRequested((value) => value + 1)}>
       {loading ? '正在读取文件清单…' : error ? '重试读取文件清单' : '查看文件清单'}
     </Button>
     {error && <p role="alert" className="text-xs text-destructive">{error}</p>}

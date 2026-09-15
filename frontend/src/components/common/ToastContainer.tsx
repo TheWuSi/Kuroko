@@ -41,12 +41,12 @@ function ToastCard({ toast, onClose }: { toast: ToastItem; onClose: () => void }
       {icons[toast.type]}
       <div className="flex-1 text-sm">
         {toast.title && <div className="font-semibold text-slate-900 mb-0.5">{toast.title}</div>}
-        <div className="text-slate-600 leading-snug break-words">{toast.message}</div>
+        <div className="text-slate-600 leading-snug wrap-break-word">{toast.message}</div>
       </div>
       <button
         onClick={onClose}
         aria-label="关闭提示"
-        className="min-h-[44px] min-w-[44px] -my-2 -mr-2 flex items-center justify-center text-slate-400 hover:text-slate-600 rounded-sm cursor-pointer"
+        className="min-h-11 min-w-11 -my-2 -mr-2 flex items-center justify-center text-slate-400 hover:text-slate-600 rounded-sm cursor-pointer"
       >
         <X className="h-4 w-4" />
       </button>

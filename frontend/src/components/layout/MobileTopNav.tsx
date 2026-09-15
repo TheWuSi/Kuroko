@@ -19,7 +19,7 @@ export function MobileTopNav() {
         <SheetTrigger asChild>
           <button
             type="button"
-            className="p-2 -mr-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
+            className="p-2 -mr-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 min-h-11 min-w-11 flex items-center justify-center cursor-pointer"
             aria-label="打开菜单"
           >
             <Menu className="h-5 w-5" />

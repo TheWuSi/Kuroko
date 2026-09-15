@@ -44,10 +44,10 @@ export function ScanProgress() {
       </div>
       <p className="text-xs text-muted-foreground">耗时 <span className="font-mono">{elapsed}</span></p>
       {job.current_path && <p className="break-all font-mono text-xs text-muted-foreground">当前目录：{job.current_path}</p>}
-      {job.error_message && <p role="alert" className="break-words rounded-md bg-destructive/10 p-2 text-xs text-destructive">{job.error_message}</p>}
+      {job.error_message && <p role="alert" className="wrap-break-word rounded-md bg-destructive/10 p-2 text-xs text-destructive">{job.error_message}</p>}
       {active ? <>
         <p className="text-xs text-muted-foreground">扫描在后台持续运行，可关闭面板、切换页面或刷新浏览器。</p>
-        <Button variant="outline" className="min-h-[44px] w-full gap-2" disabled={cancelling || job.cancel_requested}
+        <Button variant="outline" className="min-h-11 w-full gap-2" disabled={cancelling || job.cancel_requested}
           onClick={() => void cancelTrackedScan().catch((error) => toast.error(error instanceof Error ? error.message : '取消扫描失败'))}>
           {cancelling || job.cancel_requested ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
           {job.cancel_requested ? '等待当前请求结束后停止' : '取消扫描'}

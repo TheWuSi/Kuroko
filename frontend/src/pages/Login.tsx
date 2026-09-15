@@ -128,7 +128,7 @@ export function Login() {
 
               <Button
                 type="submit"
-                className="w-full mt-2 min-h-[44px] text-base font-semibold"
+                className="w-full mt-2 min-h-11 text-base font-semibold"
                 disabled={submitting}
               >
                 {submitting ? (

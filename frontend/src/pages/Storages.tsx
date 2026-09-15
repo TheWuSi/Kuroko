@@ -160,13 +160,13 @@ export function Storages() {
 
   return <div className="space-y-6">
     <PageHeader title="存储节点与分组" description="选择 OpenList 存储组成分组，为每个成员指定下载目录与媒体库归档目录。">
-      <Button variant="outline" className="min-h-[44px] gap-2" onClick={() => void loadData(true)} disabled={loading || busy}>
+      <Button variant="outline" className="min-h-11 gap-2" onClick={() => void loadData(true)} disabled={loading || busy}>
         <RefreshCw className={loading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />刷新
       </Button>
-      <Button variant="outline" className="min-h-[44px] gap-2" onClick={() => setIgnoredOpen(true)}>
+      <Button variant="outline" className="min-h-11 gap-2" onClick={() => setIgnoredOpen(true)}>
         <EyeOff className="h-4 w-4" />忽略项（{ignored.length}）
       </Button>
-      <Button className="min-h-[44px] gap-2" onClick={() => editGroup(null)} disabled={busy}>
+      <Button className="min-h-11 gap-2" onClick={() => editGroup(null)} disabled={busy}>
         <FolderPlus className="h-4 w-4" />创建存储分组
       </Button>
     </PageHeader>
@@ -199,8 +199,8 @@ export function Storages() {
                 <p className="mt-1 text-xs text-muted-foreground">{visible.length} 个成员{visible.length < group.members.length && ' · ' + (group.members.length - visible.length) + ' 个已忽略'}</p>
               </div>
               <div className="flex gap-1">
-                <Button variant="ghost" className="min-h-[44px] gap-1.5" disabled={busy} onClick={() => editGroup(group)}><Pencil className="h-4 w-4" />编辑</Button>
-                <Button variant="ghost" className="min-h-[44px] gap-1.5 text-destructive" disabled={busy} onClick={() => setDeletingGroup(group)}><Trash2 className="h-4 w-4" />删除</Button>
+                <Button variant="ghost" className="min-h-11 gap-1.5" disabled={busy} onClick={() => editGroup(group)}><Pencil className="h-4 w-4" />编辑</Button>
+                <Button variant="ghost" className="min-h-11 gap-1.5 text-destructive" disabled={busy} onClick={() => setDeletingGroup(group)}><Trash2 className="h-4 w-4" />删除</Button>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -244,8 +244,8 @@ export function Storages() {
                 {node.free_space === null && <p className="text-muted-foreground">{node.space_error || '剩余容量未知'}。按 0 汇总，可指定目录下载。</p>}
               </div>
               <div className="flex flex-wrap justify-end gap-1 border-t pt-2">
-                <Button variant="ghost" className="min-h-[44px] gap-1.5 text-muted-foreground" disabled={busy} onClick={() => void changeIgnore(node.id, true)}><EyeOff className="h-4 w-4" />忽略节点</Button>
-                <Button variant="ghost" className="min-h-[44px] gap-1.5" disabled={busy} onClick={() => {
+                <Button variant="ghost" className="min-h-11 gap-1.5 text-muted-foreground" disabled={busy} onClick={() => void changeIgnore(node.id, true)}><EyeOff className="h-4 w-4" />忽略节点</Button>
+                <Button variant="ghost" className="min-h-11 gap-1.5" disabled={busy} onClick={() => {
                   setQuotaNode(node); setQuotaGb(node.total_space ? String(node.total_space / 1024 ** 3) : '1024')
                 }}><Sliders className="h-4 w-4" />设置配额</Button>
               </div>
@@ -262,12 +262,12 @@ export function Storages() {
         </DialogHeader>
         <form onSubmit={saveGroup} className="space-y-5">
           <div className="space-y-1.5"><label htmlFor="group-name" className="text-sm font-medium">分组名称</label>
-            <Input id="group-name" value={groupName} onChange={(event) => setGroupName(event.target.value)} maxLength={100} required disabled={busy} className="min-h-[44px]" placeholder="例如：主媒体库" />
+            <Input id="group-name" value={groupName} onChange={(event) => setGroupName(event.target.value)} maxLength={100} required disabled={busy} className="min-h-11" placeholder="例如：主媒体库" />
           </div>
           <fieldset className="space-y-2" disabled={busy}>
             <legend className="mb-2 text-sm font-medium">选择 OpenList 存储</legend>
             <div className="grid max-h-48 gap-2 overflow-y-auto sm:grid-cols-2">
-              {storages.map((node) => <label key={node.id} className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-md border p-3 has-checked:border-primary has-checked:bg-primary/5">
+              {storages.map((node) => <label key={node.id} className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border p-3 has-checked:border-primary has-checked:bg-primary/5">
                 <input type="checkbox" checked={members.some((member) => member.storage_id === node.id)} onChange={() => toggleMember(node)} className="h-4 w-4 accent-primary" />
                 <span className="min-w-0 break-all font-mono text-sm">{node.mount_path}</span>
               </label>)}
@@ -280,7 +280,7 @@ export function Storages() {
             ) : <fieldset key={index} disabled={busy} className="min-w-0 space-y-4 rounded-lg border p-3 sm:p-4">
               <div className="flex items-center justify-between gap-2">
                 <p className="min-w-0 break-all font-mono text-sm font-semibold">{member.storage_mount}</p>
-                <Button type="button" variant="ghost" className="min-h-[44px] min-w-[44px] shrink-0 px-2 text-muted-foreground" aria-label={'移除成员 ' + member.storage_mount}
+                <Button type="button" variant="ghost" className="min-h-11 min-w-11 shrink-0 px-2 text-muted-foreground" aria-label={'移除成员 ' + member.storage_mount}
                   onClick={() => setMembers((previous) => previous.filter((_, position) => position !== index))}><Trash2 className="h-4 w-4" /></Button>
               </div>
               {!member.storage_id && <p className="text-sm text-destructive">此旧挂载未找到，请重新选择有效节点。</p>}
@@ -288,7 +288,7 @@ export function Storages() {
                 <label htmlFor={'priority-' + index} className="text-sm font-medium">存储优先级</label>
                 <Input id={'priority-' + index} type="number" min={0} max={9999} step={1} required
                   value={member.priority} onChange={(event) => updateMember(index, { priority: Number(event.target.value) })}
-                  className="min-h-[44px] font-mono sm:max-w-40" />
+                  className="min-h-11 font-mono sm:max-w-40" />
                 <p className="text-xs text-muted-foreground">0～9999，数值越大越优先；空间不足时使用下一节点。</p>
               </div>
               <StorageDirectoryField label="下载目录" storageId={member.storage_id || null} mountPath={member.storage_mount}
@@ -298,17 +298,17 @@ export function Storages() {
                   <div className="min-w-0 flex-1"><StorageDirectoryField label={'归档目录 ' + (position + 1)} storageId={member.storage_id || null}
                     mountPath={member.storage_mount} value={path} disabled={busy}
                     onChange={(value) => updateMember(index, { archive_paths: member.archive_paths.map((entry, slot) => slot === position ? value : entry) })} /></div>
-                  <Button type="button" variant="ghost" className="min-h-[44px] min-w-[44px] px-2" aria-label={'移除归档目录 ' + (position + 1)}
+                  <Button type="button" variant="ghost" className="min-h-11 min-w-11 px-2" aria-label={'移除归档目录 ' + (position + 1)}
                     onClick={() => updateMember(index, { archive_paths: member.archive_paths.filter((_, slot) => slot !== position) })}><Trash2 className="h-4 w-4" /></Button>
                 </div>)}
-                <Button type="button" variant="outline" className="min-h-[44px] gap-1.5" disabled={member.archive_paths.length >= 20}
+                <Button type="button" variant="outline" className="min-h-11 gap-1.5" disabled={member.archive_paths.length >= 20}
                   onClick={() => updateMember(index, { archive_paths: [...member.archive_paths, ''] })}><Plus className="h-4 w-4" />添加归档目录</Button>
               </div>
             </fieldset>)}
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" className="min-h-[44px]" disabled={busy} onClick={() => setGroupOpen(false)}>取消</Button>
-            <Button type="submit" className="min-h-[44px] gap-2" disabled={busy || !members.length}>
+            <Button type="button" variant="outline" className="min-h-11" disabled={busy} onClick={() => setGroupOpen(false)}>取消</Button>
+            <Button type="submit" className="min-h-11 gap-2" disabled={busy || !members.length}>
               {busy && <Loader2 className="h-4 w-4 animate-spin" />}保存分组
             </Button>
           </DialogFooter>
@@ -322,7 +322,7 @@ export function Storages() {
         {!ignored.length && <p className="text-sm text-muted-foreground">暂无忽略项。</p>}
         {ignored.map((node) => <div key={node.storage_id} className="flex flex-col gap-2 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
           <span className="min-w-0 break-all font-mono text-sm">{node.storage_mount}</span>
-          <Button variant="outline" disabled={busy} className="min-h-[44px] shrink-0" onClick={() => void changeIgnore(node.storage_id, false)}>恢复节点</Button>
+          <Button variant="outline" disabled={busy} className="min-h-11 shrink-0" onClick={() => void changeIgnore(node.storage_id, false)}>恢复节点</Button>
         </div>)}
       </DialogContent>
     </Dialog>
@@ -332,11 +332,11 @@ export function Storages() {
         <DialogHeader><DialogTitle>设置存储总配额</DialogTitle><DialogDescription>{quotaNode?.mount_path}：保存配额后读取用量，统计不完整时剩余空间仍显示未知。</DialogDescription></DialogHeader>
         <form onSubmit={saveQuota} className="space-y-4">
           <label htmlFor="quota-gb" className="block text-sm font-medium">总容量（GB）</label>
-          <Input id="quota-gb" type="number" min="0.001" step="any" value={quotaGb} onChange={(event) => setQuotaGb(event.target.value)} required disabled={busy} className="min-h-[44px] font-mono" />
+          <Input id="quota-gb" type="number" min="0.001" step="any" value={quotaGb} onChange={(event) => setQuotaGb(event.target.value)} required disabled={busy} className="min-h-11 font-mono" />
           <DialogFooter className="gap-2">
-            {quotaNode?.space_source === 'manual' && <Button type="button" variant="outline" className="min-h-[44px] sm:mr-auto" disabled={busy} onClick={() => void resetQuota()}>恢复自动获取</Button>}
-            <Button type="button" variant="outline" className="min-h-[44px]" disabled={busy} onClick={() => setQuotaNode(null)}>取消</Button>
-            <Button type="submit" disabled={busy} className="min-h-[44px]">保存容量</Button>
+            {quotaNode?.space_source === 'manual' && <Button type="button" variant="outline" className="min-h-11 sm:mr-auto" disabled={busy} onClick={() => void resetQuota()}>恢复自动获取</Button>}
+            <Button type="button" variant="outline" className="min-h-11" disabled={busy} onClick={() => setQuotaNode(null)}>取消</Button>
+            <Button type="submit" disabled={busy} className="min-h-11">保存容量</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -345,7 +345,7 @@ export function Storages() {
     <AlertDialog open={deletingGroup !== null} onOpenChange={(open) => { if (!open && !busy) setDeletingGroup(null) }}>
       <AlertDialogContent>
         <AlertDialogHeader><AlertDialogTitle>删除分组“{deletingGroup?.name}”</AlertDialogTitle><AlertDialogDescription>将删除分组配置及它的重复放行规则，保留实际媒体文件与扫描记录。</AlertDialogDescription></AlertDialogHeader>
-        <AlertDialogFooter><AlertDialogCancel disabled={busy} className="min-h-[44px]">取消</AlertDialogCancel><AlertDialogAction disabled={busy} className="min-h-[44px]" onClick={(event) => { event.preventDefault(); void deleteGroup() }}>删除分组</AlertDialogAction></AlertDialogFooter>
+        <AlertDialogFooter><AlertDialogCancel disabled={busy} className="min-h-11">取消</AlertDialogCancel><AlertDialogAction disabled={busy} className="min-h-11" onClick={(event) => { event.preventDefault(); void deleteGroup() }}>删除分组</AlertDialogAction></AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
   </div>

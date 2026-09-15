@@ -56,9 +56,9 @@ export function StorageDirectoryField({ storageId, mountPath, value, onChange, l
     <label htmlFor={id} className="text-sm font-medium">{label}</label>
     <div className="flex items-center gap-2">
       <Input id={id} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled || storageId === null}
-        maxLength={1024} placeholder="选择目录，或填写完整路径" className="min-h-[44px] min-w-0 font-mono text-sm" />
+        maxLength={1024} placeholder="选择目录，或填写完整路径" className="min-h-11 min-w-0 font-mono text-sm" />
       <Button type="button" variant="outline" onClick={browse} disabled={disabled || storageId === null}
-        className="min-h-[44px] shrink-0 gap-1.5" aria-label={`浏览${label}`}>
+        className="min-h-11 shrink-0 gap-1.5" aria-label={`浏览${label}`}>
         <FolderOpen className="h-4 w-4" />浏览
       </Button>
     </div>
@@ -69,12 +69,12 @@ export function StorageDirectoryField({ storageId, mountPath, value, onChange, l
           <DialogDescription>在 {mountPath} 中打开子文件夹，然后选择当前目录。</DialogDescription>
         </DialogHeader>
         <div className="flex min-w-0 items-center gap-2">
-          <Button type="button" variant="outline" className="min-h-[44px] min-w-[44px] px-2" aria-label="返回上级目录"
+          <Button type="button" variant="outline" className="min-h-11 min-w-11 px-2" aria-label="返回上级目录"
             disabled={loading || path === mountPath} onClick={() => { setRefreshVersion(0); setPath(path.slice(0, path.lastIndexOf('/')) || '/') }}>
             <ArrowUp className="h-4 w-4" />
           </Button>
           <p className="min-w-0 flex-1 break-all font-mono text-xs">{path}</p>
-          <Button type="button" variant="ghost" className="min-h-[44px] min-w-[44px] px-2" aria-label="刷新目录"
+          <Button type="button" variant="ghost" className="min-h-11 min-w-11 px-2" aria-label="刷新目录"
             disabled={loading} onClick={() => setRefreshVersion((value) => value + 1)}><RefreshCw className="h-4 w-4" /></Button>
         </div>
         <div className="max-h-[40dvh] min-h-28 overflow-y-auto rounded-md border" aria-live="polite">
@@ -82,7 +82,7 @@ export function StorageDirectoryField({ storageId, mountPath, value, onChange, l
           {error && <p role="alert" className="p-4 text-sm text-destructive">{error}</p>}
           {!loading && !error && listing?.directories.length === 0 && <p className="p-4 text-sm text-muted-foreground">此目录没有子文件夹，可选择当前目录。</p>}
           {listing?.directories.map((directory) => <button key={directory.path} type="button"
-            className="flex min-h-[44px] w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted"
+            className="flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted"
             onClick={() => { setRefreshVersion(0); setPath(directory.path) }}>
             <Folder className="h-4 w-4 shrink-0 text-primary" /><span className="min-w-0 flex-1 break-all font-mono text-sm">{directory.name}</span>
             <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -90,8 +90,8 @@ export function StorageDirectoryField({ storageId, mountPath, value, onChange, l
         </div>
         {!allowRoot && path === mountPath && <p className="text-xs text-muted-foreground">请选择具体子目录，以限定媒体库扫描范围。</p>}
         <DialogFooter>
-          <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => setOpen(false)}>取消</Button>
-          <Button type="button" className="min-h-[44px]" disabled={loading || !listing || Boolean(error) || (!allowRoot && path === mountPath)}
+          <Button type="button" variant="outline" className="min-h-11" onClick={() => setOpen(false)}>取消</Button>
+          <Button type="button" className="min-h-11" disabled={loading || !listing || Boolean(error) || (!allowRoot && path === mountPath)}
             onClick={() => { onChange(listing!.path); setOpen(false) }}>选择当前目录</Button>
         </DialogFooter>
       </DialogContent>

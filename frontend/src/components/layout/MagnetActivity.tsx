@@ -56,6 +56,6 @@ export function MagnetActivity() {
         <p className="text-xs text-muted-foreground">{error || '后台持续运行，切页、刷新或关闭页面后仍会继续。'}</p>
       </div>
     </div>
-    <Button asChild variant="outline" className="min-h-[44px]"><Link to="/magnets">查看磁力工作台</Link></Button>
+    <Button asChild variant="outline" className="min-h-11"><Link to="/magnets">查看磁力工作台</Link></Button>
   </div>
 }

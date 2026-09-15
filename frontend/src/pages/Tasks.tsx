@@ -100,7 +100,7 @@ export function Tasks() {
     if (status !== 'pending' && status !== 'downloading') return null
     const key = `${transfer ? 'transfer' : 'offline'}:${taskId}`
     return <Button
-      variant="ghost" size="sm" className="min-h-[44px] gap-1 text-destructive"
+      variant="ghost" size="sm" className="min-h-11 gap-1 text-destructive"
       disabled={cancelling !== null || cancelRequested.has(key)}
       onClick={() => handleCancel(taskId, transfer)}
     ><X className="h-4 w-4" />{cancelRequested.has(key) ? '等待取消确认' : '取消'}</Button>
@@ -109,7 +109,7 @@ export function Tasks() {
   return (
     <div className="space-y-6">
       <PageHeader title="离线下载与转存任务" description="页面每 10 秒刷新；离线任务由后台定期同步，也可手动同步。离线完成后请查看转存状态。">
-        <Button variant="outline" onClick={handleSync} disabled={syncing} className="min-h-[44px] gap-2">
+        <Button variant="outline" onClick={handleSync} disabled={syncing} className="min-h-11 gap-2">
           <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />立即同步进度
         </Button>
       </PageHeader>
@@ -123,7 +123,7 @@ export function Tasks() {
             { id: 'failed', label: '失败' }, { id: 'cancelled', label: '已取消' },
           ].map((tab) => (
             <Button key={tab.id} variant={statusFilter === tab.id ? 'default' : 'outline'}
-              size="sm" className="min-h-[44px]" onClick={() => setStatusFilter(tab.id)}>{tab.label}</Button>
+              size="sm" className="min-h-11" onClick={() => setStatusFilter(tab.id)}>{tab.label}</Button>
           ))}
         </div>
         {loading && <p className="text-sm text-muted-foreground">正在加载离线任务…</p>}
