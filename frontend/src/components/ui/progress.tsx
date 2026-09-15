@@ -1,35 +1,32 @@
-import * as React from 'react'
-import { cn } from '@/lib/utils'
+import * as React from "react"
+import * as ProgressPrimitive from "@radix-ui/react-progress"
 
-interface ProgressProps extends React.HTMLAttributes<HTMLDivElement> {
-  value?: number
-  indicatorClassName?: string
-}
+import { cn } from "@/lib/utils"
 
-const Progress = React.forwardRef<HTMLDivElement, ProgressProps>(
-  ({ className, value = 0, indicatorClassName, ...props }, ref) => {
-    const clamped = Math.min(100, Math.max(0, value || 0))
-    return (
-      <div
-        ref={ref}
-        role="progressbar"
-        aria-valuenow={clamped}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        className={cn('relative h-2.5 w-full overflow-hidden rounded-full bg-slate-100', className)}
-        {...props}
-      >
-        <div
-          className={cn(
-            'h-full w-full flex-1 bg-blue-600 transition-all duration-300 ease-in-out',
-            indicatorClassName
-          )}
-          style={{ transform: `translateX(-${100 - clamped}%)` }}
-        />
-      </div>
-    )
-  }
-)
-Progress.displayName = 'Progress'
+const Progress = React.forwardRef<
+  React.ElementRef<typeof ProgressPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof ProgressPrimitive.Root> & { indicatorClassName?: string }
+>(({ className, value = 0, max = 100, indicatorClassName, ...props }, ref) => {
+  const limit = Number.isFinite(max) && max > 0 ? max : 100
+  const clamped = value === null ? null : Number.isFinite(value) ? Math.min(limit, Math.max(0, value)) : 0
+  return (
+    <ProgressPrimitive.Root
+      ref={ref}
+      className={cn(
+        "relative h-2.5 w-full overflow-hidden rounded-full bg-secondary",
+        className
+      )}
+      {...props}
+      value={clamped}
+      max={limit}
+    >
+      <ProgressPrimitive.Indicator
+        className={cn("h-full w-full flex-1 bg-primary transition-all", indicatorClassName)}
+        style={{ transform: `translateX(-${100 - ((clamped ?? 0) / limit) * 100}%)` }}
+      />
+    </ProgressPrimitive.Root>
+  )
+})
+Progress.displayName = ProgressPrimitive.Root.displayName
 
 export { Progress }

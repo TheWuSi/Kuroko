@@ -13,15 +13,29 @@ jobs:
   backend:
     name: Backend Checks
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     env:
       KUROKO_DATABASE_URL: sqlite://
     steps:
       - name: Check Out Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Set Up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Read Application Version
+        id: version
+        run: |
+          PYTHONPATH=backend python - <<'PY'
+          import os
+          from app.core.version import get_version
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"version={get_version()}\n")
+          PY
       - name: Install Backend Dependencies
         run: pip install -r backend/requirements.txt
       - name: Compile Python Sources
@@ -35,6 +49,8 @@ jobs:
     steps:
       - name: Check Out Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Set Up pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -71,6 +87,8 @@ jobs:
           platforms: linux/amd64
           load: true
           tags: kuroko:smoke
+          build-args: |
+            KUROKO_VERSION=${{ needs.backend.outputs.version }}
           cache-from: type=gha,scope=kuroko-image
           cache-to: type=gha,mode=max,scope=kuroko-image
       - name: Verify Container Startup and Restart

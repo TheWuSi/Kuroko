@@ -1,3 +1,6 @@
+import { Label } from '@/components/ui/label'
+import { ThemeToggle } from '@/components/common/ThemeToggle'
+import { APP_VERSION } from '@/lib/version'
 import React, { useState, useEffect } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
@@ -51,29 +54,30 @@ export function Login() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col justify-center items-center p-4 bg-slate-50">
+    <div className="relative min-h-screen flex flex-col justify-center items-center p-4 pt-16 pb-8 bg-background">
+      <div className="absolute right-4 top-4"><ThemeToggle /></div>
       <div className="w-full max-w-md">
         {/* 品牌 Logo 标题 */}
         <div className="flex flex-col items-center text-center mb-8">
-          <div className="h-12 w-12 rounded-2xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/25 mb-3">
+          <div className="h-12 w-12 rounded-2xl bg-primary flex items-center justify-center text-primary-foreground shadow-lg shadow-primary/25 mb-3">
             <Sparkles className="h-6 w-6" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Kuroko</h1>
-          <p className="text-sm text-slate-500 mt-1 font-mono">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Kuroko</h1>
+          <p className="text-sm text-muted-foreground mt-1 font-mono">
             番号管理与自动化离线下载调度系统
           </p>
         </div>
 
         {/* 尚未初始化警示条（若状态未更新时的防御性提示） */}
         {initialized === false && (
-          <div className="mb-4 p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-2.5">
-            <AlertCircle className="h-4 w-4 shrink-0 text-amber-600" />
+          <div className="mb-4 p-3.5 rounded-xl bg-warning/10 border border-warning/30 text-warning text-xs flex items-center gap-2.5">
+            <AlertCircle className="h-4 w-4 shrink-0 text-warning" />
             <div className="flex-1">
               检测到系统尚未初始化，请先创建首个超级管理员账号。
             </div>
             <Link
               to="/bootstrap"
-              className="font-semibold text-amber-900 underline hover:text-amber-700 whitespace-nowrap"
+              className="font-semibold text-warning underline hover:text-warning whitespace-nowrap"
             >
               前往初始化
             </Link>
@@ -81,20 +85,22 @@ export function Login() {
         )}
 
         {/* 登录卡片 */}
-        <Card className="shadow-lg border-slate-200/80">
+        <Card className="shadow-lg border-border">
           <CardHeader className="pb-4">
-            <CardTitle>管理员登录</CardTitle>
+            <CardTitle className="text-lg">管理员登录</CardTitle>
             <CardDescription>请输入凭据以访问控制台</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-700 block">
+                <Label htmlFor="login-username" className="text-xs font-semibold text-foreground block">
                   用户名
-                </label>
+                </Label>
                 <div className="relative">
-                  <UserIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                  <UserIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
+                    id="login-username"
+                    autoComplete="username"
                     type="text"
                     required
                     autoFocus
@@ -108,14 +114,16 @@ export function Login() {
 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-slate-700 block">
+                  <Label htmlFor="login-password" className="text-xs font-semibold text-foreground block">
                     密码
-                  </label>
-                  <span className="text-[11px] text-slate-400">至少 8 位字符</span>
+                  </Label>
+                  <span className="text-[11px] text-muted-foreground">至少 8 位字符</span>
                 </div>
                 <div className="relative">
-                  <KeyRound className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                  <KeyRound className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
+                    id="login-password"
+                    autoComplete="current-password"
                     type="password"
                     required
                     className="pl-10"
@@ -142,12 +150,12 @@ export function Login() {
               </Button>
             </form>
 
-            <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
+            <div className="mt-6 pt-4 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
               <span className="flex items-center gap-1">
-                <ShieldAlert className="h-3.5 w-3.5 text-slate-400" />
+                <ShieldAlert className="h-3.5 w-3.5 text-muted-foreground" />
                 受保护的内部管理系统
               </span>
-              <span className="font-mono text-[11px]">v2.1</span>
+              <span className="font-mono text-[11px]">{APP_VERSION}</span>
             </div>
           </CardContent>
         </Card>

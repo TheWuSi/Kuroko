@@ -84,12 +84,12 @@ export function Dashboard() {
           size="sm"
           onClick={() => loadData(true)}
           disabled={refreshing}
-          className="gap-2 min-h-11 sm:min-h-9"
+          className="gap-2 min-h-11 md:min-h-9"
         >
           <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
           刷新数据
         </Button>
-        <Button asChild size="sm" className="gap-2 min-h-11 sm:min-h-9">
+        <Button asChild size="sm" className="gap-2 min-h-11 md:min-h-9">
           <Link to="/magnets">
             <Plus className="h-4 w-4" />
             解析新磁力
@@ -147,7 +147,7 @@ export function Dashboard() {
           <Card className="shadow-xs">
             <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 gap-3">
               <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-blue-600" />
+                <Clock className="h-4 w-4 text-primary" />
                 <CardTitle className="text-base">近期任务活动流</CardTitle>
               </div>
 
@@ -174,7 +174,7 @@ export function Dashboard() {
               {loading ? (
                 <div className="space-y-3">
                   {[1, 2, 3].map((i) => (
-                    <div key={i} className="p-3.5 rounded-xl border border-slate-100 bg-slate-50/50 space-y-2">
+                    <div key={i} className="p-3.5 rounded-xl border border-border bg-muted/50 space-y-2">
                       <div className="flex justify-between items-center">
                         <Skeleton className="h-4 w-32" />
                         <Skeleton className="h-4 w-16" />
@@ -199,16 +199,16 @@ export function Dashboard() {
                   {filteredTasks.slice(0, 6).map((task) => (
                     <div
                       key={task.task_id}
-                      className="p-3.5 rounded-xl border border-slate-200/60 bg-slate-50/40 hover:bg-slate-50 transition-colors"
+                      className="p-3.5 rounded-xl border border-border bg-muted/40 hover:bg-accent transition-colors"
                     >
                       <div className="flex items-center justify-between gap-3 mb-2">
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className="font-mono font-bold text-slate-900 text-sm truncate">
+                          <span className="font-mono font-bold text-foreground text-sm truncate">
                             {task.code}
                           </span>
                           <StatusBadge status={task.status} />
                         </div>
-                        <div className="text-xs font-mono text-slate-500 shrink-0">
+                        <div className="text-xs font-mono text-muted-foreground shrink-0">
                           {task.status === 'downloading'
                             ? formatSpeed(task.speed)
                             : formatBytes(task.total_size)}
@@ -216,19 +216,19 @@ export function Dashboard() {
                       </div>
 
                       <div className="space-y-1">
-                        <div className="flex justify-between text-[11px] text-slate-400 font-mono">
+                        <div className="flex justify-between text-[11px] text-muted-foreground font-mono">
                           <span className="truncate max-w-50 sm:max-w-md">
                             📁 {task.target_path}
                           </span>
                           <span>{task.progress.toFixed(1)}%</span>
                         </div>
-                        <Progress value={task.progress} />
+                        <Progress value={task.progress} aria-label={`${task.code} 离线进度`} />
                       </div>
                     </div>
                   ))}
 
                   <div className="pt-2 text-center">
-                    <Button asChild variant="ghost" size="sm" className="text-xs text-blue-600 gap-1 min-h-11 sm:min-h-9">
+                    <Button asChild variant="ghost" size="sm" className="text-xs text-primary gap-1 min-h-11 md:min-h-9">
                       <Link to="/tasks">
                         前往完整任务管理列表
                         <ArrowRight className="h-3.5 w-3.5" />
@@ -246,13 +246,13 @@ export function Dashboard() {
           <Card className="shadow-xs">
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-blue-600" />
+                <Sparkles className="h-4 w-4 text-primary" />
                 <CardTitle className="text-base">存储池碎片与水位</CardTitle>
               </div>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button asChild variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-600">
-                    <Link to="/storages">
+                  <Button asChild variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-muted-foreground">
+                    <Link to="/storages" aria-label="管理存储驱动拓扑">
                       <ArrowRight className="h-4 w-4" />
                     </Link>
                   </Button>
@@ -292,7 +292,7 @@ export function Dashboard() {
                         <div className="flex items-center justify-between">
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <span className="font-semibold text-slate-800 truncate max-w-40 cursor-help">
+                              <span className="font-semibold text-foreground truncate max-w-40 cursor-help">
                                 {node.mount_path}
                               </span>
                             </TooltipTrigger>
@@ -300,21 +300,22 @@ export function Dashboard() {
                               挂载点: {node.mount_path} · 驱动: {node.driver}
                             </TooltipContent>
                           </Tooltip>
-                          <span className="text-slate-400">
+                          <span className="text-muted-foreground">
                             余 {formatBytes(free)}
                           </span>
                         </div>
                         {percent !== null && <Progress
                           value={percent}
+                          aria-label={`${node.mount_path} 已用容量`}
                           indicatorClassName={
                             percent > 90
-                              ? 'bg-rose-500'
+                              ? 'bg-destructive'
                               : percent > 75
-                              ? 'bg-amber-500'
-                              : 'bg-blue-600'
+                              ? 'bg-warning'
+                              : 'bg-primary'
                           }
                         />}
-                        <div className="flex justify-between text-[11px] text-slate-400">
+                        <div className="flex justify-between text-[11px] text-muted-foreground">
                           <span>驱动: {node.driver}</span>
                           <span>{percent === null ? '用量未知' : `已用 ${percent}%`}</span>
                         </div>

@@ -1,3 +1,4 @@
+import { Label } from '@/components/ui/label'
 import React, { useState, useEffect } from 'react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
@@ -212,7 +213,7 @@ export function Settings() {
         title="系统参数配置"
         description="维护 OpenList 聚合连接、BT 元数据解析服务与内容过滤规则"
       >
-        <Button onClick={handleSave} disabled={saving} className="gap-2 min-h-11 sm:min-h-9">
+        <Button onClick={handleSave} disabled={saving} className="gap-2 min-h-11 md:min-h-9">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           保存全部配置
         </Button>
@@ -221,27 +222,27 @@ export function Settings() {
       <form onSubmit={handleSave} className="space-y-6 max-w-4xl">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid grid-cols-3 h-11 p-1 mb-6">
-            <TabsTrigger value="openlist" className="gap-2 text-xs sm:text-sm">
-              <Server className="h-4 w-4" />
+            <TabsTrigger value="openlist" className="gap-1 px-1 text-xs sm:gap-2 sm:px-3 sm:text-sm">
+              <Server className="h-4 w-4 shrink-0" />
               OpenList 服务
             </TabsTrigger>
-            <TabsTrigger value="bt_parser" className="gap-2 text-xs sm:text-sm">
-              <Radio className="h-4 w-4" />
+            <TabsTrigger value="bt_parser" className="gap-1 px-1 text-xs sm:gap-2 sm:px-3 sm:text-sm">
+              <Radio className="h-4 w-4 shrink-0" />
               BT 元数据服务
             </TabsTrigger>
-            <TabsTrigger value="filter" className="gap-2 text-xs sm:text-sm">
-              <Filter className="h-4 w-4" />
+            <TabsTrigger value="filter" className="gap-1 px-1 text-xs sm:gap-2 sm:px-3 sm:text-sm">
+              <Filter className="h-4 w-4 shrink-0" />
               内容过滤规则
             </TabsTrigger>
           </TabsList>
 
           {/* 1. OpenList 连接配置 */}
           <TabsContent value="openlist" className="space-y-4">
-            <Card className="border-slate-200/80 shadow-xs">
+            <Card className="border-border shadow-xs">
               <CardHeader>
-                <div className="flex items-center gap-2 text-blue-600">
+                <div className="flex items-center gap-2 text-primary">
                   <Server className="h-5 w-5" />
-                  <CardTitle>OpenList 服务连接</CardTitle>
+                  <CardTitle className="text-lg">OpenList 服务连接</CardTitle>
                 </div>
                 <CardDescription>
                   Kuroko 离线下载与文件管理底层生态，支持账号密码或 API Token 鉴权
@@ -250,8 +251,9 @@ export function Settings() {
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1.5 sm:col-span-2">
-                    <label className="text-xs font-semibold text-slate-700 block">服务 Base URL</label>
+                    <Label htmlFor="openlist-url" className="text-xs font-semibold text-foreground block">服务 Base URL</Label>
                     <Input
+                      id="openlist-url"
                       placeholder="http://localhost:5244"
                       value={config.openlist.base_url}
                       onChange={(e) =>
@@ -265,8 +267,9 @@ export function Settings() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-700 block">认证模式</label>
+                    <Label htmlFor="openlist-auth-type" className="text-xs font-semibold text-foreground block">认证模式</Label>
                     <select
+                      id="openlist-auth-type"
                       value={config.openlist.auth_type}
                       onChange={(e) =>
                         setConfig({
@@ -277,7 +280,7 @@ export function Settings() {
                           },
                         })
                       }
-                      className="w-full h-11 px-3 rounded-lg border border-slate-200 bg-white text-sm focus:outline-hidden focus:ring-2 focus:ring-blue-100"
+                      className="native-select"
                     >
                       <option value="password">账号密码模式 (自动换取与刷新 Token)</option>
                       <option value="token">Direct Token 模式 (直连长效令牌)</option>
@@ -287,8 +290,10 @@ export function Settings() {
                   {config.openlist.auth_type === 'password' ? (
                     <>
                       <div className="space-y-1.5">
-                        <label className="text-xs font-semibold text-slate-700 block">用户名</label>
+                        <Label htmlFor="openlist-username" className="text-xs font-semibold text-foreground block">用户名</Label>
                         <Input
+                          id="openlist-username"
+                          autoComplete="off"
                           value={config.openlist.username || ''}
                           onChange={(e) =>
                             setConfig({
@@ -300,8 +305,10 @@ export function Settings() {
                         />
                       </div>
                       <div className="space-y-1.5 sm:col-span-2">
-                        <label className="text-xs font-semibold text-slate-700 block">密码</label>
+                        <Label htmlFor="openlist-password" className="text-xs font-semibold text-foreground block">密码</Label>
                         <Input
+                          id="openlist-password"
+                          autoComplete="new-password"
                           type="password"
                           placeholder="留空保留原密码，输入则修改"
                           value={config.openlist.password || ''}
@@ -317,8 +324,10 @@ export function Settings() {
                     </>
                   ) : (
                     <div className="space-y-1.5 sm:col-span-2">
-                      <label className="text-xs font-semibold text-slate-700 block">API Token</label>
+                      <Label htmlFor="openlist-token" className="text-xs font-semibold text-foreground block">API Token</Label>
                       <Input
+                        id="openlist-token"
+                        autoComplete="new-password"
                         type="password"
                         placeholder="openlist-..."
                         value={config.openlist.token || ''}
@@ -339,11 +348,10 @@ export function Settings() {
                 {/* 测试结果 Alert */}
                 {openListTestResult && (
                   <Alert
-                    variant={openListTestResult.success ? 'default' : 'destructive'}
-                    className={openListTestResult.success ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : ''}
+                    variant={openListTestResult.success ? 'success' : 'destructive'}
                   >
                     {openListTestResult.success ? (
-                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      <CheckCircle2 className="h-4 w-4 text-success" />
                     ) : (
                       <AlertCircle className="h-4 w-4" />
                     )}
@@ -363,12 +371,12 @@ export function Settings() {
                     size="sm"
                     onClick={handleTestOpenList}
                     disabled={testingOpenList}
-                    className="gap-2 min-h-11 sm:min-h-9"
+                    className="gap-2 min-h-11 md:min-h-9"
                   >
                     {testingOpenList ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     ) : (
-                      <Zap className="h-3.5 w-3.5 text-blue-600" />
+                      <Zap className="h-3.5 w-3.5 text-primary" />
                     )}
                     测试 OpenList 连通性
                   </Button>
@@ -379,11 +387,11 @@ export function Settings() {
 
           {/* 2. magnet-metadata-api 配置 */}
           <TabsContent value="bt_parser" className="space-y-4">
-            <Card className="border-slate-200/80 shadow-xs">
+            <Card className="border-border shadow-xs">
               <CardHeader>
-                <div className="flex items-center gap-2 text-blue-600">
+                <div className="flex items-center gap-2 text-primary">
                   <Radio className="h-5 w-5" />
-                  <CardTitle>magnet-metadata-api 磁力元数据服务</CardTitle>
+                  <CardTitle className="text-lg">magnet-metadata-api 磁力元数据服务</CardTitle>
                 </div>
                 <CardDescription>
                   获取种子内部文件树与完整大小；连接测试仅检查服务健康，具体磁力能否解析取决于 DHT/Peer 网络。
@@ -392,8 +400,9 @@ export function Settings() {
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1.5 sm:col-span-2">
-                    <label className="text-xs font-semibold text-slate-700 block">微服务地址</label>
+                    <Label htmlFor="metadata-url" className="text-xs font-semibold text-foreground block">微服务地址</Label>
                     <Input
+                      id="metadata-url"
                       placeholder="http://magnet-metadata-api:8080"
                       value={config.bt_parser.service_url}
                       onChange={(e) =>
@@ -407,8 +416,9 @@ export function Settings() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-700 block">解析请求超时 (秒)</label>
+                    <Label htmlFor="metadata-timeout" className="text-xs font-semibold text-foreground block">解析请求超时 (秒)</Label>
                     <Input
+                      id="metadata-timeout"
                       type="number"
                       min="1"
                       max="300"
@@ -430,7 +440,7 @@ export function Settings() {
                 <Separator />
 
                 <div className="space-y-1.5">
-                  <label htmlFor="metadata-token" className="block text-xs font-semibold text-muted-foreground">代理认证令牌（可选）</label>
+                  <Label htmlFor="metadata-token" className="block text-xs font-semibold text-muted-foreground">代理认证令牌（可选）</Label>
                   <Input
                     id="metadata-token"
                     type="password"
@@ -446,11 +456,10 @@ export function Settings() {
                 {/* BT 测试结果 Alert */}
                 {btTestResult && (
                   <Alert
-                    variant={btTestResult.success ? 'default' : 'destructive'}
-                    className={btTestResult.success ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : ''}
+                    variant={btTestResult.success ? 'success' : 'destructive'}
                   >
                     {btTestResult.success ? (
-                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      <CheckCircle2 className="h-4 w-4 text-success" />
                     ) : (
                       <AlertCircle className="h-4 w-4" />
                     )}
@@ -470,12 +479,12 @@ export function Settings() {
                     size="sm"
                     onClick={handleTestBtParser}
                     disabled={testingBt}
-                    className="gap-2 min-h-11 sm:min-h-9"
+                    className="gap-2 min-h-11 md:min-h-9"
                   >
                     {testingBt ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     ) : (
-                      <Radio className="h-3.5 w-3.5 text-blue-600" />
+                      <Radio className="h-3.5 w-3.5 text-primary" />
                     )}
                     测试 BT 解析服务
                   </Button>
@@ -486,11 +495,11 @@ export function Settings() {
 
           {/* 3. 过滤规则管道 */}
           <TabsContent value="filter" className="space-y-4">
-            <Card className="border-slate-200/80 shadow-xs">
+            <Card className="border-border shadow-xs">
               <CardHeader>
-                <div className="flex items-center gap-2 text-blue-600">
+                <div className="flex items-center gap-2 text-primary">
                   <Filter className="h-5 w-5" />
-                  <CardTitle>内容过滤管道规则</CardTitle>
+                  <CardTitle className="text-lg">内容过滤管道规则</CardTitle>
                 </div>
                 <CardDescription>
                   在解析种子文件与探测扫描时自动过滤宣传垃圾文件、小样本及夹带广告
@@ -499,29 +508,33 @@ export function Settings() {
               <CardContent className="space-y-5">
                 {/* 扩展名 Tags */}
                 <div className="space-y-2">
-                  <label className="text-xs font-semibold text-slate-700 block">
+                  <Label htmlFor="allowed-extension" className="text-xs font-semibold text-foreground block">
                     允许的视频扩展名白名单
-                  </label>
-                  <div className="flex flex-wrap gap-1.5 p-2 rounded-lg border border-slate-200 bg-slate-50/50 min-h-11 items-center">
+                  </Label>
+                  <div className="flex flex-wrap gap-1.5 p-2 rounded-lg border border-border bg-muted/50 min-h-11 items-center">
                     {config.filter.allowed_extensions.map((ext) => (
                       <Badge
                         key={ext}
                         variant="outline"
-                        className="font-mono text-xs gap-1 bg-white pl-2 pr-1 py-1"
+                        className="font-mono text-xs gap-1 bg-card pl-2 pr-1 py-1"
                       >
                         {ext}
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`移除扩展名 ${ext}`}
                           onClick={() => handleRemoveExt(ext)}
-                          className="hover:text-rose-600 cursor-pointer p-0.5"
+                          className="h-5 w-5 hover:text-destructive"
                         >
                           <X className="h-3 w-3" />
-                        </button>
+                        </Button>
                       </Badge>
                     ))}
                   </div>
                   <div className="flex gap-2">
                     <Input
+                      id="allowed-extension"
                       placeholder="输入扩展名，如 .mp4 或 mkv"
                       value={newExt}
                       onChange={(e) => setNewExt(e.target.value)}
@@ -538,7 +551,7 @@ export function Settings() {
                       variant="secondary"
                       size="sm"
                       onClick={handleAddExt}
-                      className="min-h-11 sm:min-h-9"
+                      className="min-h-11 md:min-h-9"
                     >
                       <Plus className="h-3.5 w-3.5 mr-1" />
                       添加
@@ -550,10 +563,11 @@ export function Settings() {
 
                 {/* 最小体积 */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700 block">
+                  <Label htmlFor="min-file-size" className="text-xs font-semibold text-foreground block">
                     最小多媒体文件大小 (MB)
-                  </label>
+                  </Label>
                   <Input
+                    id="min-file-size"
                     type="number"
                     min="0"
                     value={config.filter.min_file_size_mb}
@@ -568,35 +582,39 @@ export function Settings() {
                     }
                     className="max-w-xs font-mono text-sm"
                   />
-                  <p className="text-[11px] text-slate-400">小于该体积的文件将被视为广告或宣传样片并自动过滤</p>
+                  <p className="text-[11px] text-muted-foreground">小于该体积的文件将被视为广告或宣传样片并自动过滤</p>
                 </div>
 
                 <Separator />
 
                 {/* 正则黑名单 */}
                 <div className="space-y-2">
-                  <label className="text-xs font-semibold text-slate-700 block">
+                  <Label htmlFor="blacklist-pattern" className="text-xs font-semibold text-foreground block">
                     广告与黑名单关键词正则表达式
-                  </label>
+                  </Label>
                   <div className="space-y-1.5 max-h-48 overflow-y-auto">
                     {config.filter.blacklist_patterns.map((pattern) => (
                       <div
                         key={pattern}
-                        className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200 font-mono text-xs"
+                        className="flex items-center justify-between p-2 rounded-lg bg-muted border border-border font-mono text-xs"
                       >
-                        <span className="text-slate-800 truncate">{pattern}</span>
-                        <button
+                        <span className="text-foreground truncate">{pattern}</span>
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`移除正则 ${pattern}`}
                           onClick={() => handleRemoveBlacklist(pattern)}
-                          className="text-slate-400 hover:text-rose-600 p-1"
+                          className="h-6 w-6 text-muted-foreground hover:text-destructive"
                         >
                           <X className="h-3.5 w-3.5" />
-                        </button>
+                        </Button>
                       </div>
                     ))}
                   </div>
                   <div className="flex gap-2">
                     <Input
+                      id="blacklist-pattern"
                       placeholder="输入正则表达式，例如: .*广告.* 或 .*t.me.*"
                       value={newBlacklist}
                       onChange={(e) => setNewBlacklist(e.target.value)}
@@ -613,7 +631,7 @@ export function Settings() {
                       variant="secondary"
                       size="sm"
                       onClick={handleAddBlacklist}
-                      className="min-h-11 sm:min-h-9"
+                      className="min-h-11 md:min-h-9"
                     >
                       <Plus className="h-3.5 w-3.5 mr-1" />
                       添加正则

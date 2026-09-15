@@ -9,20 +9,20 @@
 4. **原生 `<input type="radio">`、`<input type="checkbox">`** — MagnetParser、Storages 中未使用 shadcn `RadioGroup`、`Checkbox`
 5. **自定义 Toast** — `ToastContainer` 是纯手写组件，不使用 shadcn `Sonner`
 6. **缺少 Label** — 所有表单场景使用裸 `<label>` 标签而不是 shadcn `Label`
-7. **版本号错误** — package.json 为 `2.0.0`，侧边栏显示 `Media Ingestion v2.1`，登录页显示 `v2.1`，应全部统一为 `0.4.0`
+7. **版本号错误** — package.json 为 `2.0.0`，侧边栏显示 `Media Ingestion v2.1`，登录页显示 `v2.1`，应全部统一为 `0.5.0`
 8. **暗色模式** — globals.css 已有 `.dark` 变量定义，但 `body` 样式仍硬编码 `bg-slate-50`/`color: #0f172a`，且无主题切换 UI
 9. **滚动条** — 自定义滚动条使用硬编码色值，暗色下不适配
 
 > [!IMPORTANT]
 > 本次重构的核心原则是**用原生 shadcn CLI 安装的组件 1:1 替换手写组件**，同时将全部页面中的硬编码颜色迁移为语义 token，使亮暗模式自然切换。不做功能变更、不做 UI 视觉风格调整（颜色调优留给后续任务）。
 
-## Open Questions
+## 已确认的实施决策
 
-> [!IMPORTANT]
-> 1. **shadcn `Select` vs 原生 `<select>`**：原生 `<select>` 在移动端的体验通常优于 Radix Select（原生会弹出系统级选择器），是否仍要全部替换为 shadcn `Select`？建议保留原生 `<select>` 但统一用 shadcn 语义 token 做样式适配。
-> 2. **Toast 替换为 Sonner**：shadcn 官方推荐使用 `sonner`。替换后整个 `useUiStore` 的 toast 系统和 `ToastContainer` 需要重写，影响范围较大。是否本次就做？
-> 3. **极简黑白风格**：你提到"黑色极简/白色极简"，目前 globals.css 里 `:root`（亮色）使用 slate 蓝灰色系，`.dark` 使用深蓝灰色系。是否要换成**纯黑白**（neutral 色系），还是先保持当前色系仅确保亮暗切换可用，后续再调色？
-> 4. **后端 main.py 版本号**：后端 `pyproject.toml` 已是 `0.4.0`，但 `app/main.py` 中 FastAPI `version="0.1.0"`，是否一并修正？
+- 保留原生 `<select>`，统一使用 `native-select` 语义样式，兼顾移动端系统选择器。
+- 本次迁移到 Sonner，通知容器放在应用根节点，覆盖登录与初始化页面。
+- 使用 neutral 亮暗主题，业务状态继续使用成功、警告、信息与错误语义色；保留现有页面结构和业务流程。
+- 按用户补充，当前发布版本为 **Git tag `v0.5.0`**，不是旧方案中的版本号。前后端发布版本跟随 tag，界面去掉 `v` 前缀；无 Git 信息时回退到项目元数据 `0.5.0`。
+- 使用轻量 `ThemeProvider` 和 `useTheme`，同时处理系统偏好变化、跨标签页同步与浏览器存储不可用。
 
 ---
 
@@ -62,9 +62,9 @@ pnpm dlx shadcn@latest add button card input textarea badge progress \
 #### [MODIFY] [globals.css](file:///codeworkspace/Kuroko/frontend/src/styles/globals.css)
 
 - 将 `:root` 和 `.dark` 的 CSS 变量更新为 shadcn 最新的 **neutral/zinc** 黑白极简色系
-- `body` 样式改用语义 token：`background-color: hsl(var(--background))` / `color: hsl(var(--foreground))`
+- `body` 样式改用语义 token：`bg-background` / `text-foreground`
 - 新增 `--sidebar`、`--chart` 等 shadcn v2 新增的语义变量
-- 自定义滚动条使用语义色 `hsl(var(--muted-foreground))` 替换硬编码色值
+- 自定义滚动条使用语义色 `var(--muted-foreground)` 替换硬编码色值
 - 新增 `@theme inline` 段补充缺失的 Tailwind v4 映射（`--color-sidebar`、`--color-chart-*` 等）
 
 #### [NEW] [hooks/useTheme.ts](file:///codeworkspace/Kuroko/frontend/src/hooks/useTheme.ts)
@@ -77,7 +77,7 @@ pnpm dlx shadcn@latest add button card input textarea badge progress \
 
 #### [MODIFY] [main.tsx](file:///codeworkspace/Kuroko/frontend/src/main.tsx)
 
-- 在 `<App>` 外层或 `App` 内包裹 `ThemeProvider`（使用 `useTheme` hook 在 `useEffect` 初始化）
+- 在 `<App>` 外层或 `App` 内包裹 `ThemeProvider`（使用 `useTheme` hook 共享上下文并在首屏同步主题）
 - 插入 inline `<script>` 到 `index.html` 防止 FOUC（Flash of Unstyled Content）
 
 #### [MODIFY] [index.html](file:///codeworkspace/Kuroko/frontend/index.html)
@@ -100,7 +100,7 @@ pnpm dlx shadcn@latest add button card input textarea badge progress \
 - `text-slate-600` → `text-muted-foreground`
 - `bg-blue-50 text-blue-600` (active) → `bg-accent text-accent-foreground`
 - `bg-slate-50 hover:bg-slate-100` (用户面板) → `bg-muted hover:bg-muted/80`
-- 版本号 `Media Ingestion v2.1` → `0.4.0`
+- 版本号 `Media Ingestion v2.1` → `0.5.0`
 - 新增主题切换按钮（Sun/Moon 图标），调用 `useTheme` 切换
 
 #### [MODIFY] [MobileTopNav.tsx](file:///codeworkspace/Kuroko/frontend/src/components/layout/MobileTopNav.tsx)
@@ -177,7 +177,7 @@ pnpm dlx shadcn@latest add button card input textarea badge progress \
 - `text-slate-900` → `text-foreground`
 - `text-slate-500` → `text-muted-foreground`
 - `bg-blue-600` → `bg-primary`
-- 版本号 `v2.1` → `0.4.0`
+- 版本号 `v2.1` → `0.5.0`
 - 裸 `<label>` → shadcn `Label`
 - 所有 `border-slate-*` → `border-border`
 
@@ -250,11 +250,16 @@ pnpm dlx shadcn@latest add button card input textarea badge progress \
 
 ### 7. 版本号统一
 
-| 位置 | 当前值 | 目标值 |
-|---|---|---|
-| [package.json](file:///codeworkspace/Kuroko/frontend/package.json) L4 | `"2.0.0"` | `"0.4.0"` |
-| [AppSidebar.tsx](file:///codeworkspace/Kuroko/frontend/src/components/layout/AppSidebar.tsx) L52 | `Media Ingestion v2.1` | `0.4.0` |
-| [Login.tsx](file:///codeworkspace/Kuroko/frontend/src/pages/Login.tsx) L150 | `v2.1` | `0.4.0` |
+| 位置 | 实施方式 |
+|---|---|
+| `frontend/package.json`、`backend/pyproject.toml` | 元数据统一为 `0.5.0`，作为无 Git 信息时的回退值 |
+| `frontend/scripts/version.ts` | 构建参数 `KUROKO_VERSION` → 当前提交可追溯的最新 Git tag → package.json |
+| `AppSidebar.tsx`、`Login.tsx` | 使用 Vite 注入的 `APP_VERSION`，避免重复硬编码 |
+| `backend/app/core/version.py` | 环境变量 `KUROKO_VERSION` → 当前提交可追溯的最新 Git tag → pyproject.toml |
+| FastAPI、`/api/v1/health` | 使用同一版本值，健康检查新增 `data.version` |
+| Docker、GitHub Actions | 构建参数把同一 tag 注入前端构建与后端运行阶段，容器冒烟检查版本一致性 |
+
+版本统一去掉 `v` 前缀，保留合法的预发布与构建标记；拒绝无效版本和超过 128 字符的输入。Git 读取有超时保护，不携带 Git 信息的镜像由发布工作流传入版本。
 
 ---
 
@@ -269,7 +274,7 @@ pnpm dlx shadcn@latest add button card input textarea badge progress \
 - `@radix-ui/react-radio-group` — RadioGroup 组件
 - `@radix-ui/react-progress` — 原生 Progress（如需用 Radix 版）
 - `sonner` — Toast 替代方案
-- `next-themes`（可选）— 或自行实现 useTheme
+- `tw-animate-css` — 补齐 Tailwind v4 下的标准组件动画；主题由本地 ThemeProvider 管理，无需 next-themes
 
 ---
 
@@ -281,11 +286,12 @@ pnpm dlx shadcn@latest add button card input textarea badge progress \
 cd frontend
 pnpm run lint          # oxlint 静态检查
 pnpm run build         # TypeScript 编译 + Vite 构建，确保零错误
+pnpm run test          # 业务回归与 Git tag 版本解析
 ```
 
 ### Manual Verification
 
-1. **亮色模式**：启动 `pnpm dev`，逐一访问全部 7 个页面（Login、Bootstrap、Dashboard、MagnetParser、Tasks、Codes、Settings、Storages），确认：
+1. **亮色模式**：启动 `pnpm dev`，逐一访问全部页面（Login、Bootstrap、Dashboard、MagnetParser、Tasks、Codes、Settings、Storages、NotFound），确认：
    - 无硬编码色值残留（文字、背景、边框均正确）
    - 卡片内文字无偏移
    - 移动端（Chrome DevTools 375px 宽度模拟）布局正常，触摸目标 ≥ 44px
@@ -301,11 +307,21 @@ pnpm run build         # TypeScript 编译 + Vite 构建，确保零错误
    - 刷新页面后主题保持（无 FOUC）
 
 4. **版本号**：
-   - 侧边栏显示 `0.4.0`（不带 v 前缀）
-   - 登录页底部显示 `0.4.0`（不带 v 前缀）
-   - `package.json` version 为 `0.4.0`
+   - 侧边栏显示 `0.5.0`（不带 v 前缀）
+   - 登录页底部显示 `0.5.0`（不带 v 前缀）
+   - `package.json` 和 `pyproject.toml` 的回退版本为 `0.5.0`
+   - 后续发布更高版本 tag 时，前后端构建自动同步，健康检查与 OpenAPI 版本一致
 
 5. **响应式**：
    - 桌面端（≥1024px）：侧边栏常驻，主内容区自适应
    - 平板端（768-1023px）：侧边栏隐藏，点击汉堡菜单 Sheet 弹出
    - 手机端（<768px）：卡片单列堆叠，表格转卡片，所有按钮 min-h-[44px]
+
+## 实施与验收记录（2026-09-15）
+
+- 已通过 shadcn CLI 覆盖或校验原有组件，补齐 Label、Select、Checkbox、RadioGroup 和 Sonner；保留移动端原生下拉选择与必要的状态扩展。0.5.0 的手工番号输入也已使用标准 Input，并按后端契约限制为 64 字符。
+- 已完成 neutral 语义色迁移、三种主题偏好、首屏预设、系统跟随和跨标签页同步；登录、初始化、弹窗与通知均使用统一主题。
+- 前端 `pnpm lint`、`pnpm test`（6 个测试文件）和 `pnpm build` 通过；新版本解析测试覆盖 tag、构建参数优先级、无 Git 回退与无效版本。
+- Chrome 使用模拟 API 在 1440px、834px、375px 下验证亮暗主题，共通过 88 项页面／表单检查和 6 项磁力详情检查，无页面脚本异常或横向溢出。另验证主题刷新持久化、系统变化、存储禁用、非法缓存、首屏预设和四类通知。
+- 后端版本与 API 回归通过 50 项测试；Docker 使用独立测试版本 `v0.5.0-verification` 完成构建、首次启动和重启检查，确认前端产物、健康检查与 OpenAPI 版本一致。
+- 剩余提示：Vite 主包约 763 kB（gzip 约 235 kB），仍提示超过 500 kB；本机 pytest 存在既有 `asyncio_mode` 配置告警。浏览器业务数据使用替身，本次未连接真实网盘服务。

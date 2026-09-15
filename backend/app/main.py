@@ -14,6 +14,7 @@ from app.core.config import get_settings
 from app.core.database import SessionLocal, ensure_runtime_dirs, init_db
 from app.core.responses import ApiError
 from app.core.spa import mount_spa
+from app.core.version import get_version
 from app.services.code_service import recover_orphaned_scans
 from app.services.download_service import sync_tasks, sync_transfer_revision
 from app.services.magnet_jobs import MagnetJobRunner
@@ -64,7 +65,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="Kuroko API",
     description="基于 OpenList 的磁力链接番号管理与离线下载系统",
-    version="0.1.0",
+    version=get_version(),
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
@@ -98,7 +99,7 @@ async def validation_error(_: Request, exc: RequestValidationError):
 @app.get("/api/v1/health", tags=["System"])
 async def health_check():
     """基础健康检查接口."""
-    return {"code": 0, "message": "healthy", "data": {"status": "ok"}}
+    return {"code": 0, "message": "healthy", "data": {"status": "ok", "version": app.version}}
 
 
 app.include_router(api_router)

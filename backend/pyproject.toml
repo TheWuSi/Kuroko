@@ -1,6 +1,6 @@
 [project]
 name = "kuroko-backend"
-version = "0.4.0"
+version = "0.5.0"
 description = "Kuroko - 基于 OpenList 的磁力链接番号管理与离线下载系统"
 requires-python = ">=3.12"
 

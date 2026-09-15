@@ -1,8 +1,11 @@
+import { Label } from '@/components/ui/label'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import React, { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/common/PageHeader'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { StorageDirectoryField } from '@/components/common/StorageDirectoryField'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
@@ -211,29 +214,33 @@ export function MagnetParser() {
           <Textarea aria-label="磁力链接，每行一条" placeholder="粘贴磁力链接，每行一条，最多 100 条" value={inputText}
             maxLength={MAX_DRAFT_LENGTH} onChange={handleInputChange} className="min-h-40 font-mono text-xs leading-relaxed" />
           <div className="space-y-4 rounded-lg border p-3 sm:p-4">
-            <fieldset className="flex flex-wrap gap-x-5 gap-y-2" disabled={submitting || parsing}>
-              <legend className="mb-2 text-sm font-medium">下载位置</legend>
-              <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
-                <input type="radio" name="target-mode" checked={targetMode === 'direct'} onChange={() => setTargetMode('direct')} />选择 OpenList 存储与目录
-              </label>
-              <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
-                <input type="radio" name="target-mode" checked={targetMode === 'group'} onChange={() => setTargetMode('group')} />分组自动选盘
-              </label>
+            <fieldset disabled={submitting || parsing}>
+              <legend id="target-mode-label" className="mb-2 text-sm font-medium">下载位置</legend>
+              <RadioGroup name="target-mode" value={targetMode} disabled={submitting || parsing} aria-labelledby="target-mode-label"
+                onValueChange={(value) => { if (value === 'direct' || value === 'group') setTargetMode(value) }}
+                className="flex flex-wrap gap-x-5 gap-y-2">
+                <Label htmlFor="target-mode-direct" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
+                  <RadioGroupItem id="target-mode-direct" value="direct" />选择 OpenList 存储与目录
+                </Label>
+                <Label htmlFor="target-mode-group" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
+                  <RadioGroupItem id="target-mode-group" value="group" />分组自动选盘
+                </Label>
+              </RadioGroup>
             </fieldset>
             {targetMode === 'direct' ? <div className="space-y-4">
               <div className="space-y-1.5">
-                <label htmlFor="download-storage" className="text-sm font-medium">OpenList 存储</label>
+                <Label htmlFor="download-storage" className="text-sm font-medium">OpenList 存储</Label>
                 <select id="download-storage" value={selectedStorage} disabled={submitting || parsing}
-                  className="min-h-11 w-full rounded-md border border-input bg-background px-3 font-mono text-sm"
+                  className="native-select font-mono"
                   onChange={(event) => { setSelectedStorage(event.target.value); setTargetPath('') }}>
                   <option value="">{storages.length ? '请选择挂载存储' : '暂无可用挂载，请检查连接与忽略项'}</option>
                   {storages.map((node) => <option key={node.id} value={node.id} disabled={node.status !== 'work'}>{node.mount_path} · {node.driver}{node.status !== 'work' ? '（不可用）' : ''}</option>)}
                 </select>
               </div>
               {currentStorage && groups.some((group) => group.members.some((member) => member.storage_id === currentStorage.id || member.storage_mount === currentStorage.mount_path)) && <div className="space-y-1.5">
-                <label htmlFor="saved-download-path" className="text-sm font-medium">使用分组中已配置的下载目录</label>
+                <Label htmlFor="saved-download-path" className="text-sm font-medium">使用分组中已配置的下载目录</Label>
                 <select id="saved-download-path" value="" onChange={(event) => setTargetPath(event.target.value)} disabled={submitting || parsing}
-                  className="min-h-11 w-full rounded-md border border-input bg-background px-3 text-sm">
+                  className="native-select">
                   <option value="">选择常用目录…</option>
                   {groups.flatMap((group) => group.members.filter((member) => member.storage_id === currentStorage.id || member.storage_mount === currentStorage.mount_path)
                     .map((member) => <option key={group.id + '-' + member.id} value={member.download_path}>{group.name} · {member.download_path}</option>))}
@@ -243,9 +250,9 @@ export function MagnetParser() {
                 value={targetPath} onChange={setTargetPath} allowRoot disabled={submitting || parsing} />
               {targetPath && !targetReady && <p className="text-xs text-destructive">请选择所选挂载内的有效绝对目录。</p>}
             </div> : <div className="space-y-1.5">
-              <label htmlFor="download-group" className="text-sm font-medium">存储分组</label>
+              <Label htmlFor="download-group" className="text-sm font-medium">存储分组</Label>
               <select id="download-group" value={selectedGroup} disabled={submitting || parsing} onChange={(event) => setSelectedGroup(event.target.value)}
-                className="min-h-11 w-full rounded-md border border-input bg-background px-3 text-sm">
+                className="native-select">
                 <option value="">{groups.length ? '请选择分组' : '请先在存储页面创建分组'}</option>
                 {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
               </select>
@@ -283,7 +290,7 @@ export function MagnetParser() {
                 disabled={state.changing || submitting} onClick={() => void run(() => changeMagnetParse('resume'))}>继续未完成 / 重试失败项</Button>}
           </div>
         </div>
-        <Progress value={job.total ? job.completed / job.total * 100 : 0} />
+        <Progress value={job.total ? job.completed / job.total * 100 : 0} aria-label="磁力解析进度" />
         {parsing && <p className="text-xs text-muted-foreground">逐条等待元数据返回，可能持续较长时间。可切页或关闭浏览器，回来继续查看。
           {job.items.some((item) => item.status === 'running') && ` 正在等待第 ${job.items.filter((item) => item.status === 'running').map((item) => item.index + 1).join('、')} 条。`}
         </p>}
@@ -374,14 +381,14 @@ export function MagnetParser() {
             </div>
             {item.existing_location && <p className="break-all font-mono text-xs text-muted-foreground">库内路径：{item.existing_location}</p>}
             {editing?.index === item.index && <div className="space-y-2 rounded-lg border p-3">
-              <label htmlFor={`manual-code-${item.index}`} className="text-sm font-medium">手工番号</label>
+              <Label htmlFor={`manual-code-${item.index}`} className="text-sm font-medium">手工番号</Label>
               <p className="text-xs text-muted-foreground">填写后立即重算版本、分集与查重；留空保存表示放弃识别（提交时记为 UNKNOWN）。</p>
               <div className="flex flex-wrap gap-2">
-                <input id={`manual-code-${item.index}`} value={editing.value} autoComplete="off" spellCheck={false}
+                <Input id={`manual-code-${item.index}`} value={editing.value} maxLength={64} autoComplete="off" spellCheck={false}
                   onChange={(event) => setEditing({ index: item.index, value: event.target.value })}
                   onKeyDown={(event) => { if (event.key === 'Enter') void saveManualCode(item.index) }}
                   placeholder="例如 300MIUM-777"
-                  className="min-h-11 min-w-0 flex-1 rounded-md border border-input bg-background px-3 font-mono text-sm" />
+                  className="min-h-11 min-w-0 flex-1 font-mono text-sm" />
                 <Button className="min-h-11" disabled={savingCode === item.index} onClick={() => void saveManualCode(item.index)}>
                   {savingCode === item.index ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}保存
                 </Button>

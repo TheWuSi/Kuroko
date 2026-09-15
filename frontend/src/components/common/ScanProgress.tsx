@@ -29,12 +29,12 @@ export function ScanProgress() {
           {active && job.cancel_requested ? '等待停止' : labels[job.status]}
         </Badge>
       </div>
-      {error && <p role="status" className="text-xs text-amber-700 dark:text-amber-400">{error}，后台任务会继续运行。</p>}
+      {error && <p role="status" className="text-xs text-warning">{error}，后台任务会继续运行。</p>}
       <div className="space-y-2">
         <div className="flex justify-between gap-2 text-xs text-muted-foreground">
           <span>扫描范围完成度</span><span className="font-mono">{job.completed_roots} / {job.total_roots}</span>
         </div>
-        <Progress value={job.progress_percent} />
+        <Progress value={job.progress_percent} aria-label="扫描范围完成度" />
       </div>
       <div className="grid grid-cols-2 gap-3 text-xs">
         {[

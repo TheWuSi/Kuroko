@@ -2,7 +2,7 @@
 
 | 文档版本 | 状态 | 编写日期 | 适用系统版本 |
 | :--- | :--- | :--- | :--- |
-| v2.0.0 | 规划定稿 | 2026-09-11 | Kuroko v2.0+ |
+| v2.0.0 | 规划定稿 | 2026-09-11 | Kuroko 0.5+ |
 
 ---
 
@@ -11,7 +11,7 @@
 Kuroko 是一套面向媒体番号资产管理、磁力链接清洗解析、离线下载智能调度与存储空间拓扑管理的现代化 Web 应用，采用前后端分离但支持单镜像整合部署的系统架构。
 
 核心组件如下：
-- **前端（Frontend SPA）**：基于 Vite + React 19 + TypeScript + Zustand + Shadcn/ui + Tailwind CSS (v4) 构建，贯彻 **Porcelain Tech（白瓷科技亮色优先）** 美术设计语言并全端响应式适配手机、平板与桌面。在生产环境中由 FastAPI 挂载的 SPA 静态中间件统一托管。
+- **前端（Frontend SPA）**：基于 Vite + React 19 + TypeScript + Zustand + Shadcn/ui + Tailwind CSS (v4) 构建，使用 neutral 语义主题并全端响应式适配手机、平板与桌面。在生产环境中由 FastAPI 挂载的 SPA 静态中间件统一托管。
 - **后端（Backend RESTful API）**：基于 FastAPI 构建的高性能异步接口服务，承担 JWT 鉴权、磁力链接清洗、两阶段番号识别、库内去重、Best-Fit 碎片空间优先调度算法及下载任务轮询同步。
 - **持久层（Database）**：嵌入式 SQLite 搭配 SQLAlchemy 2.0 ORM，持久化用户、任务、番号记录、存储分组与系统配置。
 - **外部协同服务**：
@@ -140,16 +140,17 @@ sequenceDiagram
 
 磁力草稿用独立的 Zustand store＋`localStorage` 按用户 ID 保存，包含输入修订号、关联条目索引及尚未确认的创建请求编号。每次输入即时保存，提交完成只移出同一修订草稿中的成功项；恢复历史先保存可撤销备份。账号变化只清内存，磁力草稿与存储展示缓存的清理相互独立。全局磁力任务跟踪不依赖页面挂载，运行时每两秒查询，失败退避到最多 30 秒。
 
-### 3.2 美术设计方案 (Porcelain Tech 亮色优先)
-- **视觉风格**：现代高质感白瓷科技风（亮色优先，保留深色切换能力），底色采用温和的 `bg-slate-50`，卡片采用纯白 `bg-white` 配合精细微阴影 `shadow-sm shadow-slate-900/5` 与细腻边框 `border-slate-200/80`。
+### 3.2 界面组件与主题
+- **组件来源**：使用 shadcn CLI 的 `default` 组件，保留状态徽章与进度条指示器的必要扩展；表单使用 `Label`、`Checkbox`、`RadioGroup`，原生下拉框保留移动端系统选择器并共用语义样式。
+- **主题管理**：neutral 亮暗色定义集中在 `frontend/src/styles/globals.css`。`ThemeProvider` 支持 `light/dark/system`，偏好保存在 `kuroko-theme`，监听系统偏好和跨标签页变化；`index.html` 在应用加载前预设主题，避免首屏闪烁。通知由应用根节点的 Sonner 统一展示，覆盖登录与初始化流程。
 - **全端响应式体系 (Mobile-First)**：
   - 手机端：顶部紧凑 TopNav + 汉堡抽屉 Sheet 导航，按钮触控区 `>= 44px`；
   - 表格智能降级：任务列表与番号列表在移动端自适应折叠为垂直卡片流，杜绝横向滚动断裂；
   - 桌面端：常驻左侧 240px 侧边栏，大盘数据表格与双栏工作台。
 - **色彩令牌体系 (Tokens)**：
-  - 底色系统：底层温和微冷灰 (`#f8fafc`)、白瓷卡片色 (`#ffffff`)、悬停浮层色 (`#f1f5f9`)；
-  - 高光与品牌：深邃群青蓝 (`#2563eb`)、天蓝高光 (`#0284c7`)；
-  - 语义状态：就绪/成功绿 (`#059669`)、已存在/跳过金 (`#d97706`)、错误/已满红 (`#e11d48`)；
+  - 底色与文字使用 `background/foreground`、`card/card-foreground`、`popover/popover-foreground`，边框与焦点使用 `border/input/ring`；
+  - 品牌与交互使用 `primary`、`accent`、`muted`，由主题决定实际颜色；
+  - 业务状态保留 `success/warning/info/destructive` 语义色，在亮暗主题中分别定义可读色值；
   - 数据等宽字体：番号、哈希、路径与容量统一使用 `JetBrains Mono`。
 - **动态微交互**：
   - 输入框实时磁力 Tracker 净化微光提示动效；
@@ -317,6 +318,8 @@ OpenList 读取缓存以连接配置摘要隔离，最多保存 256 项：存储
 番号列表的 `total` 继续用于文件分页，`total_codes` 为同一分组／搜索范围的去重数量。查重文件按组匹配下载／归档根路径并返回用途标签，目录重叠取最长匹配，同根双用途同时保留。
 
 ## 6. 部署与协同编排
+
+前后端版本优先使用构建参数／环境变量 `KUROKO_VERSION`，本地源码其次读取当前提交可追溯的 Git tag，最后回退到项目元数据。发布工作流把同一 tag 传入 Docker 的前端构建阶段和后端运行阶段，界面、健康检查及 OpenAPI 均去掉 `v` 前缀；版本必须为不超过 128 字符的有效语义化版本。
 
 可执行配置以根目录 [docker-compose.yml](../../docker-compose.yml) 为准：Kuroko 整合前端静态文件，依赖元数据服务健康，元数据服务依赖 Redis 健康。
 

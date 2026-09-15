@@ -1,13 +1,12 @@
 import { Outlet } from 'react-router'
 import { AppSidebar } from './AppSidebar'
 import { MobileTopNav } from './MobileTopNav'
-import { ToastContainer } from '@/components/common/ToastContainer'
 import { BackgroundActivity } from './BackgroundActivity'
 import { MagnetActivity } from './MagnetActivity'
 
 export function AppLayout() {
   return (
-    <div className="min-h-screen flex flex-col lg:flex-row bg-slate-50">
+    <div className="min-h-screen flex flex-col lg:flex-row bg-background">
       {/* 桌面端常驻侧边栏 */}
       <div className="hidden lg:block shrink-0 sticky top-0 h-screen">
         <AppSidebar />
@@ -22,9 +21,6 @@ export function AppLayout() {
         <MagnetActivity />
         <Outlet />
       </main>
-
-      {/* 全局 Toast 通知容器 */}
-      <ToastContainer />
     </div>
   )
 }

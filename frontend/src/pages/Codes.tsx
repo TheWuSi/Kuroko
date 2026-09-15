@@ -1,3 +1,4 @@
+import { Label } from '@/components/ui/label'
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router'
 import { DuplicateReview } from '@/components/common/DuplicateReview'
@@ -181,7 +182,7 @@ export function Codes() {
             setScanOpen(true)
             setSelectedScanGroup(selectedGroup)
           }}
-          className="gap-2 bg-blue-600 hover:bg-blue-700 min-h-11 sm:min-h-9"
+          className="gap-2 bg-primary hover:bg-primary/90 min-h-11 md:min-h-9"
         >
           <Radar className="h-4 w-4" />
           {scanning ? '查看扫描进度' : '定向探测扫描'}
@@ -202,7 +203,7 @@ export function Codes() {
       {/* 搜索与过滤工具栏 */}
       <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
         <div className="relative w-full sm:max-w-md">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             aria-label="搜索番号"
             placeholder="按番号代码搜索，如 ABC-123..."
@@ -214,11 +215,11 @@ export function Codes() {
         </div>
         <select aria-label="媒体库分组筛选" value={selectedGroup ?? ''}
           onChange={(event) => { setSelectedGroup(event.target.value ? Number(event.target.value) : undefined); setPage(1) }}
-          className="min-h-11 w-full rounded-md border border-input bg-background px-3 text-sm sm:w-auto">
+          className="native-select sm:w-auto">
           <option value="">全部媒体记录</option>
           {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
         </select>
-        <div className="text-xs text-slate-500 font-mono self-start sm:self-auto">
+        <div className="text-xs text-muted-foreground font-mono self-start sm:self-auto">
           第 {page} 页 / 共 {Math.ceil(total / 24) || 1} 页
         </div>
       </div>
@@ -229,7 +230,7 @@ export function Codes() {
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
           {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-            <Card key={i} className="p-4 space-y-3 border-slate-200/80">
+            <Card key={i} className="p-4 space-y-3 border-border">
               <div className="flex justify-between items-center">
                 <Skeleton className="h-5 w-24" />
                 <Skeleton className="h-5 w-5 rounded-md" />
@@ -253,11 +254,11 @@ export function Codes() {
           {codes.map((item) => (
             <Card
               key={`${item.code}-${item.storage_path}-${item.file_name}`}
-              className="border-slate-200/80 shadow-xs hover:shadow-md transition-all group"
+              className="border-border shadow-xs hover:shadow-md transition-all group"
             >
               <CardContent className="p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="font-mono text-base font-bold text-slate-900 group-hover:text-blue-600 transition-colors truncate mr-2">
+                  <span className="font-mono text-base font-bold text-foreground group-hover:text-primary transition-colors truncate mr-2">
                     {item.code}
                   </span>
 
@@ -270,7 +271,7 @@ export function Codes() {
                           className="min-h-11 min-w-11 p-2 text-muted-foreground hover:text-foreground rounded-md hover:bg-muted cursor-pointer"
                         >
                           {copiedCode === item.code ? (
-                            <Check className="h-3.5 w-3.5 text-emerald-600" />
+                            <Check className="h-3.5 w-3.5 text-success" />
                           ) : (
                             <Copy className="h-3.5 w-3.5" />
                           )}
@@ -306,7 +307,7 @@ export function Codes() {
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           onClick={() => setDeletingCode(item.code)}
-                          className="cursor-pointer gap-2 text-rose-600 focus:text-rose-600 focus:bg-rose-50"
+                          className="cursor-pointer gap-2 text-destructive focus:text-destructive focus:bg-destructive/10"
                         >
                           <Trash2 className="h-4 w-4" />
                           <span>从归档移除</span>
@@ -316,11 +317,11 @@ export function Codes() {
                   </div>
                 </div>
 
-                <div className="space-y-1.5 text-xs text-slate-500 font-mono">
+                <div className="space-y-1.5 text-xs text-muted-foreground font-mono">
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <div className="flex items-center gap-1.5 truncate cursor-help">
-                        <Film className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        <Film className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                         <span className="truncate">{item.file_name}</span>
                       </div>
                     </TooltipTrigger>
@@ -332,7 +333,7 @@ export function Codes() {
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <div className="flex items-center gap-1.5 truncate cursor-help">
-                        <HardDrive className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        <HardDrive className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                         <span className="truncate">{item.storage_path}</span>
                       </div>
                     </TooltipTrigger>
@@ -364,11 +365,11 @@ export function Codes() {
             size="sm"
             disabled={page <= 1 || loading}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
-            className="min-h-11 sm:min-h-9"
+            className="min-h-11 md:min-h-9"
           >
             上一页
           </Button>
-          <span className="text-xs font-mono text-slate-500 px-2">
+          <span className="text-xs font-mono text-muted-foreground px-2">
             {page} / {Math.ceil(total / 24)}
           </span>
           <Button
@@ -376,7 +377,7 @@ export function Codes() {
             size="sm"
             disabled={page >= Math.ceil(total / 24) || loading}
             onClick={() => setPage((p) => p + 1)}
-            className="min-h-11 sm:min-h-9"
+            className="min-h-11 md:min-h-9"
           >
             下一页
           </Button>
@@ -387,7 +388,7 @@ export function Codes() {
       <Sheet open={scanOpen} onOpenChange={setScanOpen}>
         <SheetContent side="right" className="w-full overflow-y-auto p-6 sm:max-w-md">
           <SheetHeader>
-            <div className="flex items-center gap-2 text-blue-600">
+            <div className="flex items-center gap-2 text-primary">
               <Radar className="h-5 w-5" />
               <SheetTitle>定向探测扫描</SheetTitle>
             </div>
@@ -399,16 +400,17 @@ export function Codes() {
           <div className="mt-6 space-y-6">
             {isScanActive(scanStatus) && <ScanProgress />}
             <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-700 block">
+              <Label htmlFor="scan-group" className="text-xs font-semibold text-foreground block">
                 指定扫描分组 (可选)
-              </label>
+              </Label>
               <select
+                id="scan-group"
                 value={(isScanActive(scanStatus) ? scanStatus?.group_id : selectedScanGroup) ?? ''}
                 onChange={(e) =>
                   setSelectedScanGroup(e.target.value ? Number(e.target.value) : undefined)
                 }
                 disabled={scanning}
-                className="w-full h-11 px-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                className="native-select"
               >
                 <option value="">全部分组配置目录</option>
                 {groups.map((g) => (
@@ -462,14 +464,14 @@ export function Codes() {
           <AlertDialogHeader>
             <AlertDialogTitle>确认从番号库归档移除？</AlertDialogTitle>
             <AlertDialogDescription>
-              将番号 <span className="font-mono font-bold text-slate-900">{deletingCode}</span> 从本地索引数据库中删除。注意：这不会删除网盘云端实际媒体文件。
+              将番号 <span className="font-mono font-bold text-foreground">{deletingCode}</span> 从本地索引数据库中删除。注意：这不会删除网盘云端实际媒体文件。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmDeleteCode}
-              className="bg-rose-600 hover:bg-rose-700 text-white"
+              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
             >
               确认移除
             </AlertDialogAction>

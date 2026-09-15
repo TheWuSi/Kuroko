@@ -1,3 +1,5 @@
+import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { EyeOff, FolderPlus, HardDrive, Layers, Loader2, Pencil, Plus, RefreshCw, Sliders, Trash2 } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
@@ -239,7 +241,7 @@ export function Storages() {
               </div>
               <div className="space-y-2 text-xs">
                 <div className="flex justify-between gap-2 font-mono"><span>已用 {formatBytes(node.used_space)}</span><span>剩余 {formatBytes(node.free_space)}</span></div>
-                {percent !== null && <Progress value={percent} />}
+                {percent !== null && <Progress value={percent} aria-label={`${node.mount_path} 已用容量`} />}
                 <p className="font-mono text-muted-foreground">总容量 {formatBytes(node.total_space)}</p>
                 {node.free_space === null && <p className="text-muted-foreground">{node.space_error || '剩余容量未知'}。按 0 汇总，可指定目录下载。</p>}
               </div>
@@ -261,16 +263,16 @@ export function Storages() {
           <DialogDescription>优先使用优先级最高且空间足够的节点，同优先级按最小剩余空间选择。查重覆盖组内下载与归档目录。</DialogDescription>
         </DialogHeader>
         <form onSubmit={saveGroup} className="space-y-5">
-          <div className="space-y-1.5"><label htmlFor="group-name" className="text-sm font-medium">分组名称</label>
+          <div className="space-y-1.5"><Label htmlFor="group-name" className="text-sm font-medium">分组名称</Label>
             <Input id="group-name" value={groupName} onChange={(event) => setGroupName(event.target.value)} maxLength={100} required disabled={busy} className="min-h-11" placeholder="例如：主媒体库" />
           </div>
           <fieldset className="space-y-2" disabled={busy}>
             <legend className="mb-2 text-sm font-medium">选择 OpenList 存储</legend>
             <div className="grid max-h-48 gap-2 overflow-y-auto sm:grid-cols-2">
-              {storages.map((node) => <label key={node.id} className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border p-3 has-checked:border-primary has-checked:bg-primary/5">
-                <input type="checkbox" checked={members.some((member) => member.storage_id === node.id)} onChange={() => toggleMember(node)} className="h-4 w-4 accent-primary" />
+              {storages.map((node) => <Label key={node.id} htmlFor={'storage-node-' + node.id} className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border p-3 has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary/5">
+                <Checkbox id={'storage-node-' + node.id} checked={members.some((member) => member.storage_id === node.id)} onCheckedChange={() => toggleMember(node)} disabled={busy} />
                 <span className="min-w-0 break-all font-mono text-sm">{node.mount_path}</span>
-              </label>)}
+              </Label>)}
             </div>
             {!storages.length && <p className="text-sm text-muted-foreground">暂无可选节点，请先连接 OpenList 或恢复忽略项。</p>}
           </fieldset>
@@ -285,7 +287,7 @@ export function Storages() {
               </div>
               {!member.storage_id && <p className="text-sm text-destructive">此旧挂载未找到，请重新选择有效节点。</p>}
               <div className="space-y-1.5">
-                <label htmlFor={'priority-' + index} className="text-sm font-medium">存储优先级</label>
+                <Label htmlFor={'priority-' + index} className="text-sm font-medium">存储优先级</Label>
                 <Input id={'priority-' + index} type="number" min={0} max={9999} step={1} required
                   value={member.priority} onChange={(event) => updateMember(index, { priority: Number(event.target.value) })}
                   className="min-h-11 font-mono sm:max-w-40" />
@@ -331,7 +333,7 @@ export function Storages() {
       <DialogContent className="bg-card">
         <DialogHeader><DialogTitle>设置存储总配额</DialogTitle><DialogDescription>{quotaNode?.mount_path}：保存配额后读取用量，统计不完整时剩余空间仍显示未知。</DialogDescription></DialogHeader>
         <form onSubmit={saveQuota} className="space-y-4">
-          <label htmlFor="quota-gb" className="block text-sm font-medium">总容量（GB）</label>
+          <Label htmlFor="quota-gb" className="block text-sm font-medium">总容量（GB）</Label>
           <Input id="quota-gb" type="number" min="0.001" step="any" value={quotaGb} onChange={(event) => setQuotaGb(event.target.value)} required disabled={busy} className="min-h-11 font-mono" />
           <DialogFooter className="gap-2">
             {quotaNode?.space_source === 'manual' && <Button type="button" variant="outline" className="min-h-11 sm:mr-auto" disabled={busy} onClick={() => void resetQuota()}>恢复自动获取</Button>}

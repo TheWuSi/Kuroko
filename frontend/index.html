@@ -2,13 +2,26 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // 在样式和应用加载前应用主题，避免已选暗色的页面先闪现亮色。
+      (() => {
+        let theme = 'system'
+        try {
+          const saved = localStorage.getItem('kuroko-theme')
+          if (saved === 'light' || saved === 'dark') theme = saved
+        } catch { /* 存储不可用时跟随系统。 */ }
+        const dark = theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.classList.toggle('dark', dark)
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+      })()
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Kuroko - 磁力链接番号管理与离线下载系统</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   </head>
-  <body class="bg-slate-50 text-slate-900 antialiased selection:bg-blue-100 selection:text-blue-900 min-h-screen">
+  <body class="bg-background text-foreground antialiased selection:bg-primary/15 selection:text-foreground min-h-screen">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

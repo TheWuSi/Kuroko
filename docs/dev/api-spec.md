@@ -59,6 +59,20 @@ HTTP 状态码相应为 `4xx` 或 `5xx`。
 
 ---
 
+### 1.4 健康检查与发布版本
+
+`GET /api/v1/health` 无需认证，返回服务状态与发布版本：
+
+```json
+{
+  "code": 0,
+  "message": "healthy",
+  "data": { "status": "ok", "version": "0.5.0" }
+}
+```
+
+`version` 与 OpenAPI 的 `info.version` 一致，跟随 Git tag 并去掉 `v` 前缀。镜像构建通过 `KUROKO_VERSION` 同时注入前后端；无 Git 信息的源码包使用项目元数据版本。
+
 ## 2. 状态码与业务错误码清单
 
 ### 2.1 HTTP 状态码约定

@@ -111,7 +111,7 @@ export function DuplicateReview({ groupId, refreshVersion }: { groupId?: number;
                   <p className="break-all font-mono">{file.storage_path.replace(/\/$/, '')}/{file.file_name}</p>
                 </li>)}
               </ul>
-              {!item.can_ignore && <p className="text-xs text-amber-700 dark:text-amber-400">
+              {!item.can_ignore && <p className="text-xs text-warning">
                 {item.code.startsWith('FC2-') ? '存在同版本、同一分集的重复文件。' : '存在同一版本的多份文件。'}
                 版本共存不能放行这些重复副本。
               </p>}

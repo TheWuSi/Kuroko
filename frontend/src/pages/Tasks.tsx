@@ -176,7 +176,7 @@ export function Tasks() {
             </div>
             <div className="space-y-1">
               <div className="flex justify-between font-mono text-xs text-muted-foreground"><span>{task.progress.toFixed(1)}%</span><span>{formatBytes(task.total_size || null)}</span></div>
-              <Progress value={task.progress} />
+              <Progress value={task.progress} aria-label={`${task.name} 转存进度`} />
             </div>
             {task.status_detail && <p className="break-all text-xs text-muted-foreground">{task.status_detail}</p>}
             {task.error_message && <p className="break-all text-xs text-destructive">{task.error_message}</p>}
@@ -191,7 +191,7 @@ export function Tasks() {
 function TaskProgress({ task }: { task: DownloadTask }) {
   return <div className="space-y-1">
     <div className="flex justify-between gap-2 font-mono text-xs text-muted-foreground"><span>{task.progress.toFixed(1)}%</span><span>{formatBytes(task.total_size || null)}</span></div>
-    <Progress value={task.progress} />
+    <Progress value={task.progress} aria-label={`${task.code} 离线进度`} />
     {task.status === 'downloading' && <p className="text-xs text-muted-foreground">速率：{formatSpeed(task.speed)} · 已下载约 {formatBytes(task.total_size ? task.downloaded_size : null)}</p>}
   </div>
 }

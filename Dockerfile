@@ -11,6 +11,8 @@ COPY frontend/package.json frontend/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
 COPY frontend/ .
+# 版本只参与应用构建，保留跨版本发布时的依赖层缓存。
+ARG KUROKO_VERSION
 RUN pnpm build
 
 # --- 阶段 2: 运行镜像 ---
@@ -41,6 +43,9 @@ COPY --from=web-builder /app/frontend/dist /app/static
 
 # 创建持久化和日志目录
 RUN mkdir -p /app/config /app/data /app/logs
+
+ARG KUROKO_VERSION
+ENV KUROKO_VERSION=${KUROKO_VERSION}
 
 EXPOSE 8000
 VOLUME ["/app/config", "/app/data", "/app/logs"]

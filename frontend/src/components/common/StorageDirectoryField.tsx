@@ -1,3 +1,4 @@
+import { Label } from '@/components/ui/label'
 import { useEffect, useId, useState } from 'react'
 import { ArrowUp, ChevronRight, Folder, FolderOpen, Loader2, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -53,7 +54,7 @@ export function StorageDirectoryField({ storageId, mountPath, value, onChange, l
   }
 
   return <div className="min-w-0 space-y-1.5">
-    <label htmlFor={id} className="text-sm font-medium">{label}</label>
+    <Label htmlFor={id} className="text-sm font-medium">{label}</Label>
     <div className="flex items-center gap-2">
       <Input id={id} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled || storageId === null}
         maxLength={1024} placeholder="选择目录，或填写完整路径" className="min-h-11 min-w-0 font-mono text-sm" />

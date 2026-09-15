@@ -47,6 +47,7 @@ from urllib.request import urlopen
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from app.core.version import get_version
 
 base_url = "http://127.0.0.1:8000"
 deadline = time.monotonic() + 60
@@ -62,6 +63,15 @@ while True:
         break
     except (URLError, TimeoutError, ConnectionError):
         time.sleep(min(1, max(0, deadline - time.monotonic())))
+
+version = get_version()
+if health.get("data", {}).get("version") != version:
+    raise RuntimeError("健康接口未返回镜像版本")
+with urlopen(base_url + "/openapi.json", timeout=5) as response:
+    if json.load(response)["info"]["version"] != version:
+        raise RuntimeError("OpenAPI 文档版本与镜像版本不一致")
+if not any(version.encode() in asset.read_bytes() for asset in Path("/app/static/assets").glob("*.js")):
+    raise RuntimeError("前端构建产物未包含镜像版本")
 
 index_html = Path("/app/static/index.html").read_bytes()
 if not index_html:

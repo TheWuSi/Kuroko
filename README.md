@@ -76,12 +76,18 @@ make dev-frontend
 
 镜像支持 `linux/amd64` 和 `linux/arm64`。正式版本 `vX.Y.Z` 同时提供 `vX.Y.Z`、`X.Y.Z`、`X.Y` 和 `latest` 标签，`latest` 沿用每次匹配标签发布时更新的规则。启动冒烟检查在 amd64 镜像中验证新库迁移、健康接口、前端首页及重启后的数据保留，发布后检查两种架构的镜像清单。
 
+界面、后端 OpenAPI 和 `/api/v1/health` 的 `data.version` 使用同一发布版本，显示时去掉 `v` 前缀。发布工作流通过构建参数 `KUROKO_VERSION` 将 Git tag 同时注入前后端；本地开发读取当前提交可追溯的最新版本 tag。没有 Git 信息且未传构建参数时，分别回退到 `frontend/package.json` 与 `backend/pyproject.toml` 的版本（当前为 `0.5.0`）。
+
 本地可执行同样的镜像检查，需要 Docker 和 Python 3：
 
 ```bash
-docker build --platform linux/amd64 -t kuroko:smoke .
+docker build --platform linux/amd64 \
+  --build-arg KUROKO_VERSION="$(git describe --tags --abbrev=0 --match 'v[0-9]*' --match '[0-9]*')" \
+  -t kuroko:smoke .
 bash scripts/verify/docker-smoke.sh kuroko:smoke
 ```
+
+界面支持亮色、暗色和跟随系统，可在登录页、初始化页、侧边栏或移动端顶部切换。偏好保存在当前浏览器的 `kuroko-theme` 中，刷新后保持，并同步到同源标签页。
 
 ## 前置要求
 
