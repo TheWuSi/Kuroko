@@ -20,12 +20,19 @@ import {
   Plus,
   X,
   Zap,
+  Palette,
+  Sun,
+  Moon,
+  Monitor,
+  Check,
 } from 'lucide-react'
 import { configService } from '@/services/config.service'
 import { toast } from '@/stores/uiStore'
+import { useTheme, THEME_PALETTES, type Theme } from '@/hooks/useTheme'
 import type { SystemConfigData } from '@/types/api'
 
 export function Settings() {
+  const { theme, resolvedTheme, setTheme, palette, setPalette } = useTheme()
   const [config, setConfig] = useState<SystemConfigData | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -211,28 +218,39 @@ export function Settings() {
     <div className="space-y-6">
       <PageHeader
         title="系统参数配置"
-        description="维护 OpenList 聚合连接、BT 元数据解析服务与内容过滤规则"
+        description="维护 OpenList 聚合连接、BT 元数据解析服务、内容过滤规则与外观主题"
       >
-        <Button onClick={handleSave} disabled={saving} className="gap-2 min-h-11 md:min-h-9">
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-          保存全部配置
-        </Button>
+        {activeTab !== 'appearance' ? (
+          <Button onClick={handleSave} disabled={saving} className="gap-2 min-h-11 md:min-h-9">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            保存全部配置
+          </Button>
+        ) : (
+          <Badge variant="outline" className="text-xs px-3 py-1.5 gap-1.5 text-muted-foreground font-normal">
+            <Check className="h-3.5 w-3.5 text-success" />
+            主题修改即时生效并持久化
+          </Badge>
+        )}
       </PageHeader>
 
       <form onSubmit={handleSave} className="space-y-6 max-w-4xl">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid grid-cols-3 h-11 p-1 mb-6">
-            <TabsTrigger value="openlist" className="gap-1 px-1 text-xs sm:gap-2 sm:px-3 sm:text-sm">
+          <TabsList className="grid grid-cols-2 sm:grid-cols-4 h-auto p-1 mb-6 gap-1">
+            <TabsTrigger value="openlist" className="gap-1 px-1 text-xs sm:gap-2 sm:px-3 sm:text-sm min-h-10">
               <Server className="h-4 w-4 shrink-0" />
               OpenList 服务
             </TabsTrigger>
-            <TabsTrigger value="bt_parser" className="gap-1 px-1 text-xs sm:gap-2 sm:px-3 sm:text-sm">
+            <TabsTrigger value="bt_parser" className="gap-1 px-1 text-xs sm:gap-2 sm:px-3 sm:text-sm min-h-10">
               <Radio className="h-4 w-4 shrink-0" />
               BT 元数据服务
             </TabsTrigger>
-            <TabsTrigger value="filter" className="gap-1 px-1 text-xs sm:gap-2 sm:px-3 sm:text-sm">
+            <TabsTrigger value="filter" className="gap-1 px-1 text-xs sm:gap-2 sm:px-3 sm:text-sm min-h-10">
               <Filter className="h-4 w-4 shrink-0" />
               内容过滤规则
+            </TabsTrigger>
+            <TabsTrigger value="appearance" className="gap-1 px-1 text-xs sm:gap-2 sm:px-3 sm:text-sm min-h-10">
+              <Palette className="h-4 w-4 shrink-0" />
+              外观与主题
             </TabsTrigger>
           </TabsList>
 
@@ -637,6 +655,140 @@ export function Settings() {
                       添加正则
                     </Button>
                   </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* 4. 外观与主题系统设置 */}
+          <TabsContent value="appearance" className="space-y-6">
+            {/* 模式选择 */}
+            <Card className="border-border shadow-xs">
+              <CardHeader>
+                <div className="flex items-center gap-2 text-primary">
+                  {resolvedTheme === 'dark' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+                  <CardTitle className="text-lg">显示明暗模式</CardTitle>
+                </div>
+                <CardDescription>
+                  选择系统的亮色或暗色渲染模式，亦可自动跟随操作系统的全局偏好
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {[
+                    { id: 'light', label: '亮色模式', desc: '纯净清晰，适于明亮环境', icon: Sun },
+                    { id: 'dark', label: '暗色模式', desc: '深邃沉浸，夜间注视更护眼', icon: Moon },
+                    { id: 'system', label: '跟随系统', desc: '根据系统偏好自动切换', icon: Monitor },
+                  ].map((m) => {
+                    const ModeIcon = m.icon
+                    const isSelected = theme === m.id
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setTheme(m.id as Theme)}
+                        className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-3 ${
+                          isSelected
+                            ? 'border-primary bg-primary/10 shadow-xs'
+                            : 'border-border bg-card hover:bg-accent/50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 font-semibold text-sm text-foreground">
+                            <ModeIcon
+                              className={`h-4 w-4 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`}
+                            />
+                            {m.label}
+                          </div>
+                          {isSelected && (
+                            <Badge variant="default" className="text-[10px] h-5 px-1.5">
+                              已选
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">{m.desc}</p>
+                      </button>
+                    )
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* 调色风格画廊 */}
+            <Card className="border-border shadow-xs">
+              <CardHeader>
+                <div className="flex items-center gap-2 text-primary">
+                  <Palette className="h-5 w-5" />
+                  <CardTitle className="text-lg">调色板风格方案</CardTitle>
+                </div>
+                <CardDescription>
+                  精心校准的 6 套全局色彩体系，提供统一的卡片层级、数据图表与操作高亮质感
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {THEME_PALETTES.map((p) => {
+                    const isSelected = palette === p.id
+                    return (
+                      <div
+                        key={p.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setPalette(p.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            setPalette(p.id)
+                          }
+                        }}
+                        className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-3 relative ${
+                          isSelected
+                            ? 'border-primary ring-2 ring-primary/20 bg-primary/5 shadow-xs'
+                            : 'border-border bg-card hover:border-primary/40 hover:bg-accent/30'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span
+                                className="w-3.5 h-3.5 rounded-full ring-2 ring-background shrink-0 shadow-xs"
+                                style={{ backgroundColor: p.primaryColor }}
+                              />
+                              <span className="font-bold text-sm text-foreground truncate">
+                                {p.name}
+                              </span>
+                            </div>
+                            <Badge
+                              variant={isSelected ? 'default' : 'secondary'}
+                              className="text-[10px] shrink-0"
+                            >
+                              {p.tag}
+                            </Badge>
+                          </div>
+                          <span className="text-[11px] font-mono text-muted-foreground block mb-2">
+                            {p.englishName}
+                          </span>
+                          <p className="text-xs text-muted-foreground leading-relaxed">
+                            {p.description}
+                          </p>
+                        </div>
+
+                        {/* 状态底部 */}
+                        <div className="pt-3 border-t border-border flex items-center justify-between text-xs">
+                          <span className="font-mono text-[11px] text-muted-foreground">
+                            {p.primaryColor}
+                          </span>
+                          {isSelected ? (
+                            <span className="text-primary font-medium flex items-center gap-1 text-[11px]">
+                              <Check className="h-3.5 w-3.5" /> 已激活
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground text-[11px]">点击切换</span>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               </CardContent>
             </Card>

@@ -3,7 +3,7 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Tailwind v4 显式映射语义色；页面和组件只引用 token，亮暗色统一在此维护。 */
+/* Tailwind v4 显式映射语义色；页面和组件只引用 token，亮暗色与各调色板统一在此维护。 */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -48,22 +48,10 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* ==========================================================================
+   全局通用状态色与基准配置
+   ========================================================================== */
 :root {
-  color-scheme: light;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
   --success: oklch(0.527 0.154 150.069);
@@ -71,65 +59,463 @@
   --warning: oklch(0.555 0.163 48.998);
   --info: oklch(0.488 0.243 264.376);
   --overlay: oklch(0 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
   --radius: 0.5rem;
 }
 
 .dark {
-  color-scheme: dark;
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.145 0 0);
   --success: oklch(0.792 0.209 151.711);
   --success-foreground: oklch(0.145 0 0);
   --warning: oklch(0.828 0.189 84.429);
   --info: oklch(0.707 0.165 254.624);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.922 0 0);
-  --sidebar-primary-foreground: oklch(0.205 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --overlay: oklch(0 0 0);
+  --radius: 0.5rem;
 }
 
+/* ==========================================================================
+   主题 1：极客靛蓝 (Indigo Slate) - 默认推荐
+   Linear / Raycast 风格，冷青灰岩底色搭配高科技感深靛蓝，长久注视舒适通透。
+   ========================================================================== */
+:root,
+[data-theme="indigo-slate"] {
+  color-scheme: light;
+  --background: oklch(0.985 0.005 260);
+  --foreground: oklch(0.145 0.02 260);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0.02 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0.02 260);
+  --primary: oklch(0.48 0.20 260);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.95 0.01 260);
+  --secondary-foreground: oklch(0.20 0.03 260);
+  --muted: oklch(0.95 0.01 260);
+  --muted-foreground: oklch(0.50 0.03 260);
+  --accent: oklch(0.94 0.015 260);
+  --accent-foreground: oklch(0.20 0.03 260);
+  --border: oklch(0.91 0.008 260);
+  --input: oklch(0.91 0.008 260);
+  --ring: oklch(0.48 0.20 260);
+  --chart-1: oklch(0.55 0.22 260);
+  --chart-2: oklch(0.60 0.15 185);
+  --chart-3: oklch(0.40 0.10 230);
+  --chart-4: oklch(0.80 0.18 85);
+  --chart-5: oklch(0.70 0.18 50);
+  --sidebar: oklch(0.98 0.006 260);
+  --sidebar-foreground: oklch(0.145 0.02 260);
+  --sidebar-primary: oklch(0.48 0.20 260);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.94 0.015 260);
+  --sidebar-accent-foreground: oklch(0.20 0.03 260);
+  --sidebar-border: oklch(0.91 0.008 260);
+  --sidebar-ring: oklch(0.48 0.20 260);
+}
+
+.dark,
+[data-theme="indigo-slate"].dark,
+[data-theme="indigo-slate"] .dark {
+  color-scheme: dark;
+  --background: oklch(0.13 0.02 260);
+  --foreground: oklch(0.96 0.008 260);
+  --card: oklch(0.175 0.022 260);
+  --card-foreground: oklch(0.96 0.008 260);
+  --popover: oklch(0.175 0.022 260);
+  --popover-foreground: oklch(0.96 0.008 260);
+  --primary: oklch(0.65 0.22 260);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.23 0.025 260);
+  --secondary-foreground: oklch(0.96 0.008 260);
+  --muted: oklch(0.22 0.02 260);
+  --muted-foreground: oklch(0.68 0.02 260);
+  --accent: oklch(0.26 0.03 260);
+  --accent-foreground: oklch(0.985 0 0);
+  --border: oklch(0.26 0.02 260);
+  --input: oklch(0.26 0.02 260);
+  --ring: oklch(0.65 0.22 260);
+  --chart-1: oklch(0.65 0.22 260);
+  --chart-2: oklch(0.70 0.17 165);
+  --chart-3: oklch(0.75 0.18 70);
+  --chart-4: oklch(0.65 0.25 305);
+  --chart-5: oklch(0.65 0.24 20);
+  --sidebar: oklch(0.15 0.022 260);
+  --sidebar-foreground: oklch(0.96 0.008 260);
+  --sidebar-primary: oklch(0.65 0.22 260);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.23 0.025 260);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.24 0.02 260);
+  --sidebar-ring: oklch(0.65 0.22 260);
+}
+
+/* ==========================================================================
+   主题 2：蔚蓝云海 (Ocean Azure)
+   Cloudflare / Docker 风格，通透湛蓝天空海与深潜暗夜蓝，存储拓扑的自然之选。
+   ========================================================================== */
+[data-theme="ocean-azure"] {
+  color-scheme: light;
+  --background: oklch(0.985 0.008 235);
+  --foreground: oklch(0.16 0.03 240);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.16 0.03 240);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.16 0.03 240);
+  --primary: oklch(0.52 0.20 235);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.94 0.015 235);
+  --secondary-foreground: oklch(0.20 0.04 235);
+  --muted: oklch(0.94 0.015 235);
+  --muted-foreground: oklch(0.48 0.04 235);
+  --accent: oklch(0.92 0.025 235);
+  --accent-foreground: oklch(0.20 0.04 235);
+  --border: oklch(0.90 0.015 235);
+  --input: oklch(0.90 0.015 235);
+  --ring: oklch(0.52 0.20 235);
+  --chart-1: oklch(0.52 0.20 235);
+  --chart-2: oklch(0.60 0.15 185);
+  --chart-3: oklch(0.45 0.12 210);
+  --chart-4: oklch(0.75 0.18 140);
+  --chart-5: oklch(0.70 0.18 50);
+  --sidebar: oklch(0.98 0.008 235);
+  --sidebar-foreground: oklch(0.16 0.03 240);
+  --sidebar-primary: oklch(0.52 0.20 235);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.92 0.025 235);
+  --sidebar-accent-foreground: oklch(0.20 0.04 235);
+  --sidebar-border: oklch(0.90 0.015 235);
+  --sidebar-ring: oklch(0.52 0.20 235);
+}
+
+[data-theme="ocean-azure"].dark,
+[data-theme="ocean-azure"] .dark {
+  color-scheme: dark;
+  --background: oklch(0.12 0.028 240);
+  --foreground: oklch(0.96 0.01 235);
+  --card: oklch(0.165 0.03 240);
+  --card-foreground: oklch(0.96 0.01 235);
+  --popover: oklch(0.165 0.03 240);
+  --popover-foreground: oklch(0.96 0.01 235);
+  --primary: oklch(0.68 0.20 235);
+  --primary-foreground: oklch(0.12 0.03 240);
+  --secondary: oklch(0.22 0.032 240);
+  --secondary-foreground: oklch(0.96 0.01 235);
+  --muted: oklch(0.20 0.025 240);
+  --muted-foreground: oklch(0.68 0.03 235);
+  --accent: oklch(0.25 0.035 240);
+  --accent-foreground: oklch(0.985 0 0);
+  --border: oklch(0.25 0.025 240);
+  --input: oklch(0.25 0.025 240);
+  --ring: oklch(0.68 0.20 235);
+  --chart-1: oklch(0.68 0.20 235);
+  --chart-2: oklch(0.70 0.17 165);
+  --chart-3: oklch(0.75 0.18 70);
+  --chart-4: oklch(0.65 0.25 280);
+  --chart-5: oklch(0.65 0.24 20);
+  --sidebar: oklch(0.14 0.03 240);
+  --sidebar-foreground: oklch(0.96 0.01 235);
+  --sidebar-primary: oklch(0.68 0.20 235);
+  --sidebar-primary-foreground: oklch(0.12 0.03 240);
+  --sidebar-accent: oklch(0.22 0.032 240);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.23 0.025 240);
+  --sidebar-ring: oklch(0.68 0.20 235);
+}
+
+/* ==========================================================================
+   主题 3：黑曜极简 (Obsidian Luxe)
+   Vercel / Apple 质感极简，高纯度黑白对比与精细轮廓线，内容为王。
+   ========================================================================== */
+[data-theme="obsidian-luxe"] {
+  color-scheme: light;
+  --background: oklch(0.985 0 0);
+  --foreground: oklch(0.14 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.14 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.14 0 0);
+  --primary: oklch(0.15 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.95 0 0);
+  --secondary-foreground: oklch(0.15 0 0);
+  --muted: oklch(0.95 0 0);
+  --muted-foreground: oklch(0.50 0 0);
+  --accent: oklch(0.93 0 0);
+  --accent-foreground: oklch(0.15 0 0);
+  --border: oklch(0.90 0 0);
+  --input: oklch(0.90 0 0);
+  --ring: oklch(0.15 0 0);
+  --chart-1: oklch(0.20 0 0);
+  --chart-2: oklch(0.40 0 0);
+  --chart-3: oklch(0.60 0 0);
+  --chart-4: oklch(0.75 0 0);
+  --chart-5: oklch(0.85 0 0);
+  --sidebar: oklch(0.98 0 0);
+  --sidebar-foreground: oklch(0.14 0 0);
+  --sidebar-primary: oklch(0.15 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.93 0 0);
+  --sidebar-accent-foreground: oklch(0.15 0 0);
+  --sidebar-border: oklch(0.90 0 0);
+  --sidebar-ring: oklch(0.15 0 0);
+}
+
+[data-theme="obsidian-luxe"].dark,
+[data-theme="obsidian-luxe"] .dark {
+  color-scheme: dark;
+  --background: oklch(0.11 0 0);
+  --foreground: oklch(0.98 0 0);
+  --card: oklch(0.16 0 0);
+  --card-foreground: oklch(0.98 0 0);
+  --popover: oklch(0.16 0 0);
+  --popover-foreground: oklch(0.98 0 0);
+  --primary: oklch(0.96 0 0);
+  --primary-foreground: oklch(0.12 0 0);
+  --secondary: oklch(0.22 0 0);
+  --secondary-foreground: oklch(0.98 0 0);
+  --muted: oklch(0.20 0 0);
+  --muted-foreground: oklch(0.66 0 0);
+  --accent: oklch(0.24 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --border: oklch(0.23 0 0);
+  --input: oklch(0.23 0 0);
+  --ring: oklch(0.70 0 0);
+  --chart-1: oklch(0.90 0 0);
+  --chart-2: oklch(0.70 0 0);
+  --chart-3: oklch(0.50 0 0);
+  --chart-4: oklch(0.35 0 0);
+  --chart-5: oklch(0.25 0 0);
+  --sidebar: oklch(0.13 0 0);
+  --sidebar-foreground: oklch(0.98 0 0);
+  --sidebar-primary: oklch(0.96 0 0);
+  --sidebar-primary-foreground: oklch(0.12 0 0);
+  --sidebar-accent: oklch(0.22 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.21 0 0);
+  --sidebar-ring: oklch(0.70 0 0);
+}
+
+/* ==========================================================================
+   主题 4：赛博幻紫 (Cyber Violet)
+   霓虹流媒体与放映室影音风格，高饱和电紫，番号媒体库氛围感最强。
+   ========================================================================== */
+[data-theme="cyber-violet"] {
+  color-scheme: light;
+  --background: oklch(0.985 0.008 300);
+  --foreground: oklch(0.15 0.03 300);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.15 0.03 300);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.15 0.03 300);
+  --primary: oklch(0.50 0.23 295);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.95 0.015 300);
+  --secondary-foreground: oklch(0.20 0.04 300);
+  --muted: oklch(0.95 0.015 300);
+  --muted-foreground: oklch(0.50 0.04 300);
+  --accent: oklch(0.93 0.025 300);
+  --accent-foreground: oklch(0.20 0.04 300);
+  --border: oklch(0.90 0.015 300);
+  --input: oklch(0.90 0.015 300);
+  --ring: oklch(0.50 0.23 295);
+  --chart-1: oklch(0.50 0.23 295);
+  --chart-2: oklch(0.65 0.18 260);
+  --chart-3: oklch(0.70 0.18 340);
+  --chart-4: oklch(0.80 0.15 80);
+  --chart-5: oklch(0.60 0.15 180);
+  --sidebar: oklch(0.98 0.008 300);
+  --sidebar-foreground: oklch(0.15 0.03 300);
+  --sidebar-primary: oklch(0.50 0.23 295);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.93 0.025 300);
+  --sidebar-accent-foreground: oklch(0.20 0.04 300);
+  --sidebar-border: oklch(0.90 0.015 300);
+  --sidebar-ring: oklch(0.50 0.23 295);
+}
+
+[data-theme="cyber-violet"].dark,
+[data-theme="cyber-violet"] .dark {
+  color-scheme: dark;
+  --background: oklch(0.125 0.028 290);
+  --foreground: oklch(0.96 0.01 300);
+  --card: oklch(0.17 0.032 290);
+  --card-foreground: oklch(0.96 0.01 300);
+  --popover: oklch(0.17 0.032 290);
+  --popover-foreground: oklch(0.96 0.01 300);
+  --primary: oklch(0.68 0.24 295);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.22 0.035 290);
+  --secondary-foreground: oklch(0.96 0.01 300);
+  --muted: oklch(0.20 0.025 290);
+  --muted-foreground: oklch(0.68 0.035 300);
+  --accent: oklch(0.26 0.04 290);
+  --accent-foreground: oklch(0.985 0 0);
+  --border: oklch(0.25 0.028 290);
+  --input: oklch(0.25 0.028 290);
+  --ring: oklch(0.68 0.24 295);
+  --chart-1: oklch(0.68 0.24 295);
+  --chart-2: oklch(0.70 0.20 260);
+  --chart-3: oklch(0.75 0.20 340);
+  --chart-4: oklch(0.80 0.18 80);
+  --chart-5: oklch(0.65 0.20 180);
+  --sidebar: oklch(0.145 0.03 290);
+  --sidebar-foreground: oklch(0.96 0.01 300);
+  --sidebar-primary: oklch(0.68 0.24 295);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.22 0.035 290);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.23 0.028 290);
+  --sidebar-ring: oklch(0.68 0.24 295);
+}
+
+/* ==========================================================================
+   主题 5：翡翠极客 (Emerald Matrix)
+   Supabase / GitHub Matrix 风格，青翠生机，与下载速率指示和健康状态天然共鸣。
+   ========================================================================== */
+[data-theme="emerald-matrix"] {
+  color-scheme: light;
+  --background: oklch(0.988 0.006 155);
+  --foreground: oklch(0.15 0.03 155);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.15 0.03 155);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.15 0.03 155);
+  --primary: oklch(0.46 0.17 155);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.95 0.015 155);
+  --secondary-foreground: oklch(0.18 0.04 155);
+  --muted: oklch(0.95 0.015 155);
+  --muted-foreground: oklch(0.48 0.035 155);
+  --accent: oklch(0.93 0.025 155);
+  --accent-foreground: oklch(0.18 0.04 155);
+  --border: oklch(0.90 0.015 155);
+  --input: oklch(0.90 0.015 155);
+  --ring: oklch(0.46 0.17 155);
+  --chart-1: oklch(0.46 0.17 155);
+  --chart-2: oklch(0.60 0.15 185);
+  --chart-3: oklch(0.50 0.18 135);
+  --chart-4: oklch(0.80 0.18 85);
+  --chart-5: oklch(0.70 0.18 50);
+  --sidebar: oklch(0.98 0.006 155);
+  --sidebar-foreground: oklch(0.15 0.03 155);
+  --sidebar-primary: oklch(0.46 0.17 155);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.93 0.025 155);
+  --sidebar-accent-foreground: oklch(0.18 0.04 155);
+  --sidebar-border: oklch(0.90 0.015 155);
+  --sidebar-ring: oklch(0.46 0.17 155);
+}
+
+[data-theme="emerald-matrix"].dark,
+[data-theme="emerald-matrix"] .dark {
+  color-scheme: dark;
+  --background: oklch(0.125 0.022 155);
+  --foreground: oklch(0.96 0.01 155);
+  --card: oklch(0.17 0.028 155);
+  --card-foreground: oklch(0.96 0.01 155);
+  --popover: oklch(0.17 0.028 155);
+  --popover-foreground: oklch(0.96 0.01 155);
+  --primary: oklch(0.72 0.20 155);
+  --primary-foreground: oklch(0.12 0.03 155);
+  --secondary: oklch(0.22 0.03 155);
+  --secondary-foreground: oklch(0.96 0.01 155);
+  --muted: oklch(0.20 0.022 155);
+  --muted-foreground: oklch(0.68 0.03 155);
+  --accent: oklch(0.25 0.035 155);
+  --accent-foreground: oklch(0.985 0 0);
+  --border: oklch(0.25 0.022 155);
+  --input: oklch(0.25 0.022 155);
+  --ring: oklch(0.72 0.20 155);
+  --chart-1: oklch(0.72 0.20 155);
+  --chart-2: oklch(0.65 0.18 200);
+  --chart-3: oklch(0.78 0.18 135);
+  --chart-4: oklch(0.80 0.18 85);
+  --chart-5: oklch(0.65 0.20 20);
+  --sidebar: oklch(0.145 0.025 155);
+  --sidebar-foreground: oklch(0.96 0.01 155);
+  --sidebar-primary: oklch(0.72 0.20 155);
+  --sidebar-primary-foreground: oklch(0.12 0.03 155);
+  --sidebar-accent: oklch(0.22 0.03 155);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.23 0.022 155);
+  --sidebar-ring: oklch(0.72 0.20 155);
+}
+
+/* ==========================================================================
+   主题 6：温暖琥珀 (Warm Amber)
+   Claude / 暖棕纸张风格，温润柔和、无刺眼蓝光，夜间使用极其护眼舒适。
+   ========================================================================== */
+[data-theme="warm-amber"] {
+  color-scheme: light;
+  --background: oklch(0.985 0.008 75);
+  --foreground: oklch(0.17 0.025 65);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.17 0.025 65);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.17 0.025 65);
+  --primary: oklch(0.48 0.15 55);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.95 0.015 75);
+  --secondary-foreground: oklch(0.20 0.03 65);
+  --muted: oklch(0.95 0.015 75);
+  --muted-foreground: oklch(0.48 0.03 65);
+  --accent: oklch(0.93 0.022 75);
+  --accent-foreground: oklch(0.20 0.03 65);
+  --border: oklch(0.90 0.015 75);
+  --input: oklch(0.90 0.015 75);
+  --ring: oklch(0.48 0.15 55);
+  --chart-1: oklch(0.48 0.15 55);
+  --chart-2: oklch(0.65 0.16 75);
+  --chart-3: oklch(0.55 0.18 40);
+  --chart-4: oklch(0.75 0.15 95);
+  --chart-5: oklch(0.60 0.15 170);
+  --sidebar: oklch(0.98 0.008 75);
+  --sidebar-foreground: oklch(0.17 0.025 65);
+  --sidebar-primary: oklch(0.48 0.15 55);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.93 0.022 75);
+  --sidebar-accent-foreground: oklch(0.20 0.03 65);
+  --sidebar-border: oklch(0.90 0.015 75);
+  --sidebar-ring: oklch(0.48 0.15 55);
+}
+
+[data-theme="warm-amber"].dark,
+[data-theme="warm-amber"] .dark {
+  color-scheme: dark;
+  --background: oklch(0.13 0.018 65);
+  --foreground: oklch(0.96 0.01 75);
+  --card: oklch(0.175 0.022 65);
+  --card-foreground: oklch(0.96 0.01 75);
+  --popover: oklch(0.175 0.022 65);
+  --popover-foreground: oklch(0.96 0.01 75);
+  --primary: oklch(0.74 0.17 65);
+  --primary-foreground: oklch(0.13 0.03 65);
+  --secondary: oklch(0.22 0.025 65);
+  --secondary-foreground: oklch(0.96 0.01 75);
+  --muted: oklch(0.20 0.02 65);
+  --muted-foreground: oklch(0.68 0.025 75);
+  --accent: oklch(0.26 0.03 65);
+  --accent-foreground: oklch(0.985 0 0);
+  --border: oklch(0.25 0.018 65);
+  --input: oklch(0.25 0.018 65);
+  --ring: oklch(0.74 0.17 65);
+  --chart-1: oklch(0.74 0.17 65);
+  --chart-2: oklch(0.65 0.18 45);
+  --chart-3: oklch(0.80 0.16 85);
+  --chart-4: oklch(0.70 0.16 110);
+  --chart-5: oklch(0.65 0.20 25);
+  --sidebar: oklch(0.15 0.02 65);
+  --sidebar-foreground: oklch(0.96 0.01 75);
+  --sidebar-primary: oklch(0.74 0.17 65);
+  --sidebar-primary-foreground: oklch(0.13 0.03 65);
+  --sidebar-accent: oklch(0.22 0.025 65);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.23 0.018 65);
+  --sidebar-ring: oklch(0.74 0.17 65);
+}
+
+/* ==========================================================================
+   全局基础重置与滚动条适配
+   ========================================================================== */
 @layer base {
   * {
     @apply border-border;
