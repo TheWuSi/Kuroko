@@ -32,6 +32,13 @@ interface SubmissionRequest {
   force: boolean
   scope: TargetScope
 }
+export type PruneReason = 'skipped' | 'submitted'
+
+interface AcceptOptions {
+  /** 批次收尾后从输入框移除的条目索引，默认移除已提交与已跳过的重复项。 */
+  prune?: (index: number) => PruneReason | null
+}
+
 interface Cache {
   draft: MagnetDraft
   backup: MagnetDraft | null
@@ -169,7 +176,7 @@ export function createMagnetDraft(storage: () => Storage | undefined = browserSt
     return request
   }
 
-  function acceptSubmission(submission: MagnetSubmission) {
+  function acceptSubmission(submission: MagnetSubmission, options: AcceptOptions = {}) {
     const state = store.getState()
     const request = state.submissionRequest
     if (!request || request.requestId !== submission.request_id) return
@@ -187,6 +194,17 @@ export function createMagnetDraft(storage: () => Storage | undefined = browserSt
         const remaining = draft.indices.flatMap((index, position) => successful.has(index) ? [] : [{ index, line: lines[position] }])
         draft = { ...draft, text: remaining.map((item) => item.line).join('\n'), indices: remaining.map((item) => item.index),
           jobId: remaining.length ? draft.jobId : null, revision: newRequestId(), updatedAt: Date.now() }
+      }
+    }
+    // 批次收尾默认移除重复项：库内已存在的条目仍可在解析结果区查看与强制下载，但不再占用输入框。
+    if (options.prune && draft.revision === request.revision && draft.jobId === submission.job_id) {
+      const lines = draft.text.split('\n').map((line) => line.trim()).filter(Boolean)
+      if (lines.length === draft.indices.length) {
+        const remaining = draft.indices.flatMap((index, position) => options.prune!(index) ? [] : [{ index, line: lines[position] }])
+        if (remaining.length < draft.indices.length) {
+          draft = { ...draft, text: remaining.map((item) => item.line).join('\n'), indices: remaining.map((item) => item.index),
+            jobId: remaining.length ? draft.jobId : null, revision: newRequestId(), updatedAt: Date.now() }
+        }
       }
     }
     commit({ draft, submissionRequest: null }, true)

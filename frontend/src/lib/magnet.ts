@@ -113,3 +113,46 @@ export function cleanBatchMagnets(text: string): {
     validMagnets,
   }
 }
+
+/**
+ * 读取剪贴板文本。
+ * 手机端浏览器多在非安全上下文或缺少剪贴板权限时屏蔽 navigator.clipboard，
+ * 因此失败后回退到 requestAnimationFrame 内的 execCommand('paste')，仍失败则交由上层提示手动粘贴。
+ */
+export async function readClipboardText(): Promise<string | null> {
+  try {
+    if (navigator.clipboard?.readText) {
+      const value = await navigator.clipboard.readText()
+      if (typeof value === 'string') return value
+    }
+  } catch {
+    /* 权限被拒或非安全上下文，继续尝试兜底方案。 */
+  }
+  try {
+    const active = document.activeElement as HTMLElement | null
+    const proxy = document.createElement('textarea')
+    proxy.setAttribute('aria-hidden', 'true')
+    proxy.style.cssText = 'position:fixed;top:-1000px;left:-1000px;opacity:0'
+    document.body.appendChild(proxy)
+    proxy.focus({ preventScroll: true })
+    const handled = document.execCommand('paste')
+    const value = handled ? proxy.value : null
+    proxy.remove()
+    active?.focus?.({ preventScroll: true })
+    return value
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 把剪贴板内容以新行追加到现有输入，绝不替换已有草稿。
+ * 逐行清洗磁力链接，非磁力文本（如说明文字）原样保留，交由解析前校验拦截。
+ */
+export function appendClipboardLines(current: string, clipboard: string): string {
+  const incoming = cleanBatchMagnets(clipboard.replace(/\r\n?/g, '\n')).cleanedText
+  const lines = incoming.split('\n').map((line) => line.trim()).filter(Boolean)
+  if (!lines.length) return current
+  const base = current.replace(/\s+$/, '')
+  return base ? `${base}\n${lines.join('\n')}` : lines.join('\n')
+}

@@ -76,3 +76,24 @@ def test_variant_prefers_file_over_parent_and_resolution_is_not_a_code() -> None
     assert extract_variant("/ABC-123-C/ABC-123-UC.mkv", "ABC-123") == "UC"
     assert extract_variant("/12345678/12345678-U.mkv", "12345678") == "U"
     assert extract_code("video-1080p.mkv") is None
+
+
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("300MIUM-777", "300MIUM-777"),
+        ("300MIUM-777.mp4", "300MIUM-777"),
+        ("[ThZu.Cc]300MIUM-777", "300MIUM-777"),
+        ("300MIUM_777_1080p", "300MIUM-777"),
+        ("259LUXU-1234-C.mkv", "259LUXU-1234"),
+        ("200GANA-2345", "200GANA-2345"),
+    ],
+)
+def test_code_extractor_supports_digit_letter_prefixes(name, expected) -> None:
+    # 前缀本身同时含数字与字母，整体作为番号身份，不在前缀内部再插入分隔符。
+    assert extract_code(name) == expected
+
+
+@pytest.mark.parametrize("name", ["SIRO-4321", "ABC-123", "FC2-PPV-1234567", "T28-001", "HEYZO-9999"])
+def test_digit_letter_rule_does_not_change_existing_codes(name) -> None:
+    assert extract_code(name) == name

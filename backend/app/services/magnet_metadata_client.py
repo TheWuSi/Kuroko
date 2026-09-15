@@ -1,5 +1,7 @@
 """magnet-metadata-api 的协议适配、健康检查和可区分原因的降级。"""
 
+import random
+import threading
 import time
 from typing import Any
 
@@ -10,6 +12,19 @@ from app.schemas.config import validate_optional_url
 from app.utils.magnet_parser import clean_magnet, magnet_display_name, magnet_info_hash
 
 MAX_BYTES = 2**63 - 1
+# 元数据服务整体并发上限：解析线程数乘以每批并发不得超过该值，避免同时打开的 DHT 检索拖垮服务。
+MAX_PARSE_CONCURRENCY = 32
+MAX_RETRY_ATTEMPTS = 5
+RETRY_BASE_DELAY = 2.0
+RETRY_MAX_DELAY = 30.0
+# 元数据服务自身过载或网络抖动占主导；连接被拒、DNS 失败与 4xx 立刻回落，不占用并发名额重试。
+RETRYABLE_REASONS = {"bt_metadata_timeout", "bt_metadata_overloaded", "bt_metadata_connection_error"}
+
+_parse_slots = threading.BoundedSemaphore(MAX_PARSE_CONCURRENCY)
+
+
+def parse_slot() -> threading.BoundedSemaphore:
+    return _parse_slots
 
 
 def _relative_path(value: str) -> str:
@@ -48,9 +63,30 @@ class MetadataPayload(BaseModel):
 
 
 class MagnetMetadataError(RuntimeError):
-    def __init__(self, message: str, *, reason: str = "bt_metadata_unavailable"):
+    def __init__(self, message: str, *, reason: str = "bt_metadata_unavailable", retry_after: float | None = None):
         super().__init__(message)
         self.reason = reason
+        self.retry_after = retry_after
+
+
+class MetadataQueueFull(RuntimeError):
+    """本地解析并发已满；调用方应让出条目，由后续轮次重新领取。"""
+
+
+def backoff_delay(attempt: int, retry_after: float | None = None, *, jitter: bool = True) -> float:
+    """指数退避；上游给出 Retry-After 时优先服从，并加入抖动避免整批同步重试。"""
+    if retry_after is not None:
+        return retry_after
+    delay = min(RETRY_MAX_DELAY, RETRY_BASE_DELAY * 2 ** max(0, attempt - 1))
+    return delay * (0.5 + random.random() * 0.5) if jitter else delay
+
+
+def wait_retry(delay: float, stop_event: threading.Event | None = None) -> None:
+    """可被停止信号打断的等待，保证停止解析或退出进程时不阻塞后台线程。"""
+    if stop_event is not None:
+        stop_event.wait(delay)
+    else:
+        time.sleep(delay)
 
 
 class MagnetMetadataApiClient:
@@ -93,10 +129,20 @@ class MagnetMetadataApiClient:
             response = self.http.request(method, f"{self.service_url}{path}", headers=headers, **kwargs)
         except httpx.TimeoutException as exc:
             raise MagnetMetadataError("磁力元数据服务请求超时", reason="bt_metadata_timeout") from exc
+        except httpx.TransportError as exc:
+            raise MagnetMetadataError("磁力元数据服务连接失败", reason="bt_metadata_connection_error") from exc
         except httpx.HTTPError as exc:
             raise MagnetMetadataError("磁力元数据服务连接失败") from exc
         if response.status_code in {408, 504}:
             raise MagnetMetadataError("磁力元数据服务解析超时", reason="bt_metadata_timeout")
+        if response.status_code == 503:
+            raise MagnetMetadataError(
+                "磁力元数据服务过载或未就绪", reason="bt_metadata_overloaded", retry_after=self._retry_after(response)
+            )
+        if response.status_code == 429:
+            raise MagnetMetadataError(
+                "磁力元数据服务限流", reason="bt_metadata_overloaded", retry_after=self._retry_after(response)
+            )
         if response.status_code == 400:
             raise MagnetMetadataError("磁力元数据服务拒绝了该磁力链接", reason="bt_metadata_invalid_request")
         if not 200 <= response.status_code < 300:
@@ -105,6 +151,14 @@ class MagnetMetadataApiClient:
             return response.json()
         except ValueError as exc:
             raise MagnetMetadataError("磁力元数据服务未返回有效 JSON", reason="bt_metadata_invalid_response") from exc
+
+    @staticmethod
+    def _retry_after(response: httpx.Response) -> float | None:
+        try:
+            value = float(response.headers.get("Retry-After", "").strip())
+        except ValueError:
+            return None
+        return value if 0 <= value <= 300 else None
 
     def fetch_metadata(self, magnet_uri: str) -> dict[str, Any]:
         magnet_uri = clean_magnet(magnet_uri)
@@ -134,11 +188,46 @@ class MagnetMetadataApiClient:
     def parse(self, magnet_uri: str) -> dict[str, Any]:
         return self.fetch_metadata(magnet_uri)
 
-    def parse_with_fallback(self, magnet_uri: str) -> dict[str, Any]:
+    def parse_with_retry(
+        self,
+        magnet_uri: str,
+        *,
+        attempts: int = MAX_RETRY_ATTEMPTS,
+        stop_event: threading.Event | None = None,
+        slot: threading.BoundedSemaphore | None = None,
+    ) -> dict[str, Any]:
+        """在本地并发名额内重试可恢复的上游故障；网络等待期间不占用解析名额以外的资源。"""
+        slot = slot if slot is not None else _parse_slots
+        attempts = max(1, min(attempts, MAX_RETRY_ATTEMPTS))
+        for attempt in range(1, attempts + 1):
+            if stop_event is not None and stop_event.is_set():
+                raise MagnetMetadataError("解析已停止", reason="bt_metadata_unavailable")
+            if not slot.acquire(timeout=1):
+                raise MetadataQueueFull("本地解析队列已满")
+            try:
+                return self.fetch_metadata(magnet_uri)
+            except MagnetMetadataError as exc:
+                if exc.reason not in RETRYABLE_REASONS or attempt >= attempts:
+                    raise
+                delay = backoff_delay(attempt, exc.retry_after)
+            finally:
+                slot.release()
+            wait_retry(delay, stop_event)
+        raise MagnetMetadataError("磁力元数据服务不可用", reason="bt_metadata_unavailable")
+
+    def parse_with_fallback(
+        self,
+        magnet_uri: str,
+        *,
+        attempts: int = 1,
+        stop_event: threading.Event | None = None,
+        slot: threading.BoundedSemaphore | None = None,
+    ) -> dict[str, Any]:
         magnet_uri = clean_magnet(magnet_uri)
         try:
-            return self.fetch_metadata(magnet_uri)
-        except MagnetMetadataError as exc:
+            return self.parse_with_retry(magnet_uri, attempts=attempts, stop_event=stop_event, slot=slot)
+        except (MagnetMetadataError, MetadataQueueFull) as exc:
+            reason = exc.reason if isinstance(exc, MagnetMetadataError) else "bt_metadata_unavailable"
             return {
                 "info_hash": magnet_info_hash(magnet_uri),
                 "name": magnet_display_name(magnet_uri),
@@ -146,7 +235,7 @@ class MagnetMetadataApiClient:
                 "files": [],
                 "metadata_fallback": True,
                 "fallback": True,
-                "fallback_reason": exc.reason,
+                "fallback_reason": reason,
             }
 
     def test_connection(self) -> dict[str, Any]:

@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { ApiResponse, MagnetJob, MagnetJobSummary, MagnetParseItem, MagnetSubmission, MagnetSubmissionSummary, TargetScope } from '@/types/api'
+import type { ApiResponse, MagnetJob, MagnetJobItem, MagnetJobSummary, MagnetParseItem, MagnetSubmission, MagnetSubmissionSummary, ParseItemStatus, TargetScope } from '@/types/api'
 
 type List<T> = { total: number; items: T[] }
 type ListParams = { active?: boolean; page?: number; request_id?: string }
@@ -21,12 +21,19 @@ export const magnetJobsService = {
     const response = await apiClient.get<ApiResponse<{ attempt: number; result: MagnetParseItem | null }>>(`/magnets/parse-jobs/${encodeURIComponent(jobId)}/items/${index}`, { signal })
     return response.data.data
   },
+  /** 手工修正番号：null 回退自动识别，空串表示放弃识别；返回后端规范化后的取值。 */
+  async correctItem(jobId: string, index: number, code: string | null): Promise<{ index: number; status: ParseItemStatus; summary: MagnetJobItem['summary']; manual_code: string | null }> {
+    const response = await apiClient.patch<ApiResponse<{ index: number; status: ParseItemStatus; summary: MagnetJobItem['summary']; manual_code: string | null }>>(
+      `/magnets/parse-jobs/${encodeURIComponent(jobId)}/items/${index}`, { code },
+    )
+    return response.data.data
+  },
   async cancel(jobId: string): Promise<MagnetJob> {
     const response = await apiClient.post<ApiResponse<MagnetJob>>(`/magnets/parse-jobs/${encodeURIComponent(jobId)}/cancel`)
     return response.data.data
   },
-  async resume(jobId: string, indices?: number[]): Promise<MagnetJob> {
-    const response = await apiClient.post<ApiResponse<MagnetJob>>(`/magnets/parse-jobs/${encodeURIComponent(jobId)}/resume`, { indices })
+  async resume(jobId: string, indices?: number[], keepDuplicates = false): Promise<MagnetJob> {
+    const response = await apiClient.post<ApiResponse<MagnetJob>>(`/magnets/parse-jobs/${encodeURIComponent(jobId)}/resume`, { indices, keep_duplicates: keepDuplicates })
     return response.data.data
   },
   async submit(jobId: string, requestId: string, indices: number[], scope: TargetScope, force: boolean): Promise<MagnetSubmission> {

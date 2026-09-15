@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, StrictInt, field_validator
 
 from app.schemas.code import CodeIdentity, CodeVariant, validate_code
+from app.utils.code_extractor import canonical_code
 from app.utils.magnet_parser import clean_magnet
 from app.utils.paths import normalize_path
 
@@ -73,6 +74,26 @@ ItemIndex = Annotated[StrictInt, Field(ge=0, le=99)]
 
 class ResumeParseRequest(BaseModel):
     indices: list[ItemIndex] | None = Field(None, min_length=1, max_length=100)
+    # 批次收尾默认移除输入框中的重复项；该开关为一次性保留，不改变默认行为。
+    keep_duplicates: bool = False
+
+
+class CorrectItemRequest(BaseModel):
+    """手工修正番号：null 回退自动识别，空串表示放弃识别（提交记为 UNKNOWN）。"""
+
+    code: str | None = Field(None, max_length=64)
+
+    @field_validator("code")
+    @classmethod
+    def validate_code(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return ""
+        if len(value) > 64 or any(ord(char) < 32 or ord(char) == 127 for char in value):
+            raise ValueError("番号格式无效，请填写 1 至 64 个可见字符")
+        return canonical_code(value)
 
 
 class SubmissionRequest(TargetScope):

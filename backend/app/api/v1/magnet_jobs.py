@@ -11,11 +11,12 @@ from app.core.responses import success
 from app.core.security import get_current_user
 from app.models.magnet_job import MagnetParseItem, MagnetParseJob, MagnetSubmission
 from app.models.user import User
-from app.schemas.magnet import ParseJobRequest, ResumeParseRequest, SubmissionRequest
+from app.schemas.magnet import CorrectItemRequest, ParseJobRequest, ResumeParseRequest, SubmissionRequest
 from app.services.magnet_jobs import (
     ACTIVE,
     JobConflictError,
     cancel_parse,
+    correct_parse_item as correct_item,
     create_parse_job,
     create_submission,
     resume_parse,
@@ -88,7 +89,23 @@ def get_parse_item(
     item = db.get(MagnetParseItem, (str(job_id), index))
     if item is None:
         raise HTTPException(404, "解析条目不存在")
-    return success({"index": item.index, "attempt": item.attempt, "status": item.status, "result": item.result})
+    # auto_code 仅用于服务端恢复自动识别，不对外暴露。
+    result = {key: value for key, value in (item.result or {}).items() if key != "auto_code"} or None
+    return success({"index": item.index, "attempt": item.attempt, "status": item.status, "result": result})
+
+
+@router.patch("/parse-jobs/{job_id}/items/{index}")
+def correct_parse_item(
+    job_id: UUID,
+    payload: CorrectItemRequest,
+    index: int = Path(ge=0, le=99),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    job = owned_job(db, job_id, user.id)
+    with job_errors():
+        item = correct_item(db, job, index, payload.code)
+    return success({"index": item.index, "status": item.status, "summary": item.summary, "manual_code": item.manual_code})
 
 
 @router.post("/parse-jobs/{job_id}/cancel")
@@ -107,7 +124,7 @@ def continue_parse_job(
 ):
     job = owned_job(db, job_id, user.id)
     with job_errors():
-        resume_parse(db, job, payload.indices)
+        resume_parse(db, job, payload.indices, keep_duplicates=payload.keep_duplicates)
     return success(serialize_job(db, job))
 
 

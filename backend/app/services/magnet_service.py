@@ -71,6 +71,53 @@ def metadata_parts(metadata: dict[str, Any], code: str, config: dict[str, Any]) 
     return sorted(parts) if parts and len(parts) <= 1000 else None
 
 
+def public_result(result: dict[str, Any]) -> dict[str, Any]:
+    """移除仅供服务端复算使用的内部字段，避免污染 API 响应与数据库摘要。"""
+    result.pop("_config", None)
+    return result
+
+
+# 仅服务端使用的字段：不进入 summary，也不出现在 API 响应中。
+INTERNAL_FIELDS = frozenset({"files", "filtered_files", "_config", "auto_code"})
+
+
+def summarize(result: dict[str, Any]) -> dict[str, Any]:
+    """生成条目摘要，剔除完整文件清单与服务端内部字段。"""
+    return {key: value for key, value in result.items() if key not in INTERNAL_FIELDS}
+
+
+def resolve_identity(result: dict[str, Any], manual_code: str | None) -> dict[str, Any]:
+    """按手工番号覆盖识别结果并重新推导版本与分集。
+
+    manual_code 为 None 表示未指定，沿用自动识别结果（每次都从识别结论重算，
+    以便用户清除手工番号后能回到 dn／文件名结果）。空串表示显式放弃识别，
+    不再回退到 dn 或文件名，避免"清除"操作被自动结果顶回去。
+    """
+    if manual_code is None:
+        code = result.get("auto_code") or None
+    else:
+        code = manual_code.strip() or None
+    result["verified_code"] = code
+    result["manual_code"] = None if manual_code is None else (manual_code.strip() or "")
+    if not code:
+        result["variant"] = "original"
+        result["part_numbers"] = None
+        return result
+    metadata = {
+        "name": result.get("metadata_name") or "",
+        "files": result.get("files") or [],
+        "metadata_fallback": result.get("metadata_fallback"),
+        "fallback": result.get("metadata_fallback"),
+    }
+    result["variant"] = metadata_variant(metadata, code, result["cleaned_magnet"])
+    config = result.get("_config")
+    # 分集仅对 FC2 有意义，重新计算需要过滤后的完整文件清单。
+    result["part_numbers"] = (
+        metadata_parts(metadata, code, config) if config and code.startswith("FC2-PPV-") else None
+    )
+    return result
+
+
 def build_parse_result(original: str, parsed: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
     """纯元数据处理不持有数据库连接，适合长耗时后台解析。"""
     cleaned = clean_magnet(original)
@@ -116,6 +163,11 @@ def build_parse_result(original: str, parsed: dict[str, Any], config: dict[str, 
         "metadata_fallback": bool(parsed.get("metadata_fallback") or parsed.get("fallback")),
         "fallback_reason": parsed.get("fallback_reason"),
         "metadata_name": parsed.get("name") or None,
+        # 手工改番号后需要复用过滤配置重算分集；序列化前会移除该字段。
+        "manual_code": None,
+        # 保留自动识别结论，用户清除手工番号时据此恢复，无需重新请求元数据。
+        "auto_code": verified_code,
+        "_config": config,
     }
 
 
@@ -136,8 +188,9 @@ def parse_magnets(
         results = []
         for original in links:
             cleaned = clean_magnet(original)
-            parsed = parser.parse_with_fallback(cleaned)
-            result = build_parse_result(original, parsed, config)
+            # 同步接口由单个请求触发，重试次数收敛，避免客户端连接被长时间占用。
+            parsed = parser.parse_with_fallback(cleaned, attempts=2)
+            result = public_result(build_parse_result(original, parsed, config))
             if result["verified_code"]:
                 result.update(
                     duplicate_decision(

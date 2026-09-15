@@ -56,7 +56,12 @@ export function initializeMagnets(userId: number | null) {
 
 function acceptSubmission(submission: MagnetSubmission) {
   const pending = magnetDraft.store.getState().submissionRequest
-  magnetDraft.acceptSubmission(submission)
+  // 默认不保留重复项：库内已存在的条目不留在输入框，避免下次解析重复占用。
+  const items = useMagnetStore.getState().job?.items ?? []
+  const blocked = new Set(
+    items.filter((item) => item.summary?.duplicate_blocked && !item.summary?.duplicate_allowed).map((item) => item.index),
+  )
+  magnetDraft.acceptSubmission(submission, { prune: (index) => (blocked.has(index) ? 'skipped' : null) })
   useMagnetStore.setState({ activeSubmission: isMagnetActive(submission) ? submission : null })
   if (submission.status === 'completed' && pending?.requestId === submission.request_id && !announced.has(submission.submission_id)) {
     announced.add(submission.submission_id)
@@ -132,18 +137,40 @@ export async function startMagnetParse(scope: TargetScope) {
   }
 }
 
-export async function changeMagnetParse(action: 'cancel' | 'resume', indices?: number[]) {
+export async function changeMagnetParse(action: 'cancel' | 'resume', indices?: number[], keepDuplicates = false) {
   const job = useMagnetStore.getState().job
   if (!job) return
   const ticket = generation
   const view = ++selection
   useMagnetStore.setState({ changing: true })
   try {
-    const updated = action === 'cancel' ? await magnetJobsService.cancel(job.job_id) : await magnetJobsService.resume(job.job_id, indices)
+    const updated = action === 'cancel' ? await magnetJobsService.cancel(job.job_id) : await magnetJobsService.resume(job.job_id, indices, keepDuplicates)
     if (ticket === generation && view === selection) useMagnetStore.setState({ job: updated })
   } finally {
     if (ticket === generation) useMagnetStore.setState({ changing: false })
   }
+}
+
+/** 手工修正番号后回写条目摘要，避免整批重新拉取。 */
+export async function correctMagnetCode(index: number, code: string | null) {
+  const job = useMagnetStore.getState().job
+  if (!job) return
+  const result = await magnetJobsService.correctItem(job.job_id, index, code)
+  useMagnetStore.setState((state) => {
+    if (!state.job || state.job.job_id !== job.job_id) return state
+    return {
+      job: {
+        ...state.job,
+        // 递增修订号让前端查重与文件树缓存失效，改为使用规范化后的番号。
+        revision: state.job.revision + 1,
+        items: state.job.items.map((item) =>
+          item.index === index
+            ? { ...item, status: result.status, summary: result.summary, manual_code: result.manual_code, error_message: null }
+            : item,
+        ),
+      },
+    }
+  })
 }
 
 export async function submitMagnetItems(indices: number[], scope: TargetScope, force: boolean) {

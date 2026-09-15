@@ -27,13 +27,16 @@ def test_fresh_database_is_migrated_and_startup_is_idempotent(tmp_path, monkeypa
     with engine.connect() as connection:
         assert (
             connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            == "0004_magnet_jobs"
+            == "0005_magnet_manual_code"
         )
         assert {"storage_ignores", "duplicate_allowances"}.issubset(inspect(connection).get_table_names())
         assert "archive_folders" in {
             column["name"] for column in inspect(connection).get_columns("storage_group_paths")
         }
         assert "ix_code_records_code" in {index["name"] for index in inspect(connection).get_indexes("code_records")}
+        assert {"manual_code", "next_attempt_at"}.issubset(
+            {column["name"] for column in inspect(connection).get_columns("magnet_parse_items")}
+        )
     engine.dispose()
 
 

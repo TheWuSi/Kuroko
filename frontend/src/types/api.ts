@@ -63,6 +63,10 @@ export interface MagnetJobItem {
   attempt: number
   summary: Omit<MagnetParseItem, 'files' | 'filtered_files'> | null
   error_message: string | null
+  /** 用户手工指定的番号；null 表示未修正，空串表示放弃识别。 */
+  manual_code: string | null
+  /** 退避重试的预计时刻，用于区分"等待重试"与"卡住"。 */
+  retry_at: string | null
   started_at: string | null
   finished_at: string | null
 }

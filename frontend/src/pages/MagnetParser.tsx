@@ -9,8 +9,8 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { LazyMagnetFiles } from '@/components/common/LazyMagnetFiles'
 import { EmptyState } from '@/components/common/EmptyState'
-import { Magnet, Zap, Download, AlertTriangle, CheckCircle2, Copy, Check, RefreshCw, History, Undo2 } from 'lucide-react'
-import { cleanBatchMagnets, cleanMagnetUri } from '@/lib/magnet'
+import { Magnet, Zap, Download, AlertTriangle, CheckCircle2, Copy, Check, RefreshCw, History, Undo2, ClipboardPaste, Pencil, RotateCcw } from 'lucide-react'
+import { cleanBatchMagnets, cleanMagnetUri, appendClipboardLines, readClipboardText } from '@/lib/magnet'
 import { MAX_DRAFT_LENGTH } from '@/lib/magnetDraft'
 import { normalizeStoragePath } from '@/lib/path'
 import { formatBytes } from '@/lib/format'
@@ -19,13 +19,14 @@ import { magnetService } from '@/services/magnet.service'
 import { useStorageStore } from '@/stores/storageStore'
 import { toast } from '@/stores/uiStore'
 import {
-  changeMagnetParse, isMagnetActive, loadMoreMagnetHistory, magnetDraft, refreshMagnets,
+  changeMagnetParse, correctMagnetCode, isMagnetActive, loadMoreMagnetHistory, magnetDraft, refreshMagnets,
   restoreMagnetJob, startMagnetParse, submitMagnetItems, updateMagnetDraft, useMagnetDraft, useMagnetStore,
 } from '@/stores/magnetStore'
 import type { DuplicateDecision, MagnetJobOutcome, TargetScope } from '@/types/api'
 
 const fallbackLabels: Record<string, string> = {
   bt_metadata_timeout: '元数据解析超时', bt_metadata_unavailable: '元数据服务不可用',
+  bt_metadata_overloaded: '元数据服务过载', bt_metadata_connection_error: '元数据服务连接失败',
   bt_metadata_invalid_request: '解析服务拒绝该链接', bt_metadata_invalid_response: '元数据响应无效',
 }
 const sameScope = (left: TargetScope, right: TargetScope) =>
@@ -57,6 +58,9 @@ export function MagnetParser() {
   const setTargetPath = (value: string) => updateMagnetDraft({ targetPath: value })
   const [cleanedBadge, setCleanedBadge] = useState<{ count: number; trackers: number } | null>(null)
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
+  const [readingClipboard, setReadingClipboard] = useState(false)
+  const [editing, setEditing] = useState<{ index: number; value: string } | null>(null)
+  const [savingCode, setSavingCode] = useState<number | null>(null)
   const [checks, setChecks] = useState<{ key: string; items: DuplicateDecision[]; error: string }>({ key: '', items: [], error: '' })
   const [checkVersion, setCheckVersion] = useState(0)
   const [clock, setClock] = useState(Date.now())
@@ -81,11 +85,15 @@ export function MagnetParser() {
   const checking = parsed.length > 0 && targetReady && checks.key !== checkKey
   const checkError = checks.key === checkKey ? checks.error : ''
   const results = parsed.map((item, position) => ({ ...item.summary!, index: item.index, attempt: item.attempt,
+    manual_code: item.manual_code, retry_at: item.retry_at,
     ...(checks.key === checkKey ? checks.items[position] : {}),
   }))
   const outcomes = new Map(job?.outcomes.filter((item) => sameScope(item.scope, scope)).map((item) => [item.index, item]))
   const downloadable = results.filter((item) => !item.duplicate_blocked && !blocked(outcomes.get(item.index)))
   const existingCount = results.filter((item) => item.duplicate_blocked).length
+  // 重复信息优先展示：库内已存在的条目排在前面，方便先决定是否保留，原始顺序在同组内保持不变。
+  const orderedResults = [...results].sort((left, right) =>
+    Number(Boolean(right.duplicate_blocked)) - Number(Boolean(left.duplicate_blocked)) || left.index - right.index)
   const matchedGroups = targetMode === 'group' ? groups.filter((group) => group.id === Number(selectedGroup)) : groups.filter((group) => group.members.some((member) => (
     [member.download_path, ...member.archive_paths].some((root) => normalizedTarget === root || normalizedTarget.startsWith(root.replace(/\/$/, '') + '/'))
   )))
@@ -120,6 +128,23 @@ export function MagnetParser() {
     updateMagnetDraft({ text: cleaned.cleanedText })
     setCleanedBadge(cleaned.totalTrackersRemoved > 0 ? { count: cleaned.totalCleaned, trackers: cleaned.totalTrackersRemoved } : null)
   }
+  // 剪贴板内容以新行追加，绝不替换已有草稿，方便手机端连续粘贴。
+  const handleReadClipboard = async () => {
+    setReadingClipboard(true)
+    try {
+      const text = await readClipboardText()
+      if (text === null) { toast.warning('无法读取剪贴板，请在浏览器允许剪贴板权限后重试，或手动长按粘贴'); return }
+      if (!text.trim()) { toast.info('剪贴板没有可粘贴的内容'); return }
+      const merged = appendClipboardLines(inputText, text)
+      if (merged === inputText) { toast.info('剪贴板内容与现有输入相同，未重复添加'); return }
+      if (merged.length > MAX_DRAFT_LENGTH) { toast.warning('剪贴板内容超出草稿容量上限，未写入'); return }
+      const added = merged.split('\n').length - inputText.split('\n').filter((line) => line.trim()).length
+      const cleaned = cleanBatchMagnets(merged)
+      updateMagnetDraft({ text: cleaned.cleanedText })
+      setCleanedBadge(cleaned.totalTrackersRemoved > 0 ? { count: cleaned.totalCleaned, trackers: cleaned.totalTrackersRemoved } : null)
+      toast.success(`已从剪贴板追加 ${Math.max(added, 1)} 行，原有输入保留`)
+    } finally { setReadingClipboard(false) }
+  }
   const handleParse = () => {
     const lines = inputText.split('\n').map((line) => line.trim()).filter(Boolean)
     if (!lines.length || lines.length > 100) { toast.warning('每次请输入 1 至 100 条磁力链接，每行一条'); return }
@@ -140,6 +165,26 @@ export function MagnetParser() {
     try { await navigator.clipboard.writeText(value); setCopiedIndex(index); toast.info('磁力链接已复制') }
     catch { toast.error('复制失败，请手动选择磁力链接复制') }
   }
+  // 保存手工番号：填了值就改为该番号，留空表示放弃识别，恢复自动识别另有独立按钮。
+  const saveManualCode = async (index: number) => {
+    if (!bound) return
+    const value = (editing?.value ?? '').trim()
+    setSavingCode(index)
+    try {
+      await correctMagnetCode(index, value)
+      setEditing(null)
+      toast.success(value ? `第 ${index + 1} 条番号已改为 ${value}` : `第 ${index + 1} 条已放弃识别，提交时记为 UNKNOWN`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '修改番号失败，请重试')
+    } finally { setSavingCode(null) }
+  }
+  const resetManualCode = async (index: number) => {
+    if (!bound) return
+    setSavingCode(index)
+    try { await correctMagnetCode(index, null); setEditing(null); toast.success(`第 ${index + 1} 条已恢复自动识别`) }
+    catch (error) { toast.error(error instanceof Error ? error.message : '恢复自动识别失败') }
+    finally { setSavingCode(null) }
+  }
   const elapsed = job ? Math.max(0, Math.floor(((job.finished_at ? Date.parse(job.finished_at) : clock) - Date.parse(job.created_at)) / 1000)) : 0
   const retryable = job?.items.some((item) => ['pending', 'failed', 'fallback'].includes(item.status))
 
@@ -148,7 +193,15 @@ export function MagnetParser() {
       <PageHeader title="磁力链接解析工作台" description="磁力草稿自动保存，后台逐条解析元数据，核对后提交离线下载" />
       <Card>
         <CardHeader className="gap-2">
-          <CardTitle className="flex items-center gap-2 text-base"><Magnet className="h-5 w-5" />磁力链接批量输入</CardTitle>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle className="flex items-center gap-2 text-base"><Magnet className="h-5 w-5" />磁力链接批量输入</CardTitle>
+            {/* 手机端复制后直接连续粘贴：按钮贴近标题，不占据底部操作区。 */}
+            <Button variant="outline" size="sm" onClick={() => void handleReadClipboard()} disabled={readingClipboard || state.starting}
+              className="h-8 gap-1.5 px-2.5 text-xs">
+              {readingClipboard ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <ClipboardPaste className="h-3.5 w-3.5" />}
+              {readingClipboard ? '读取中…' : '读取剪贴板'}
+            </Button>
+          </div>
           <p role="status" className={`text-xs ${cacheError ? 'text-destructive' : 'text-muted-foreground'}`}>
             {cacheError || (savedAt ? `草稿已保存到本机 · ${dateLabel(new Date(savedAt).toISOString())}` : '输入会自动保存，刷新或重新登录后可继续。')}
           </p>
@@ -266,15 +319,21 @@ export function MagnetParser() {
         <span>正在核实上一次提交是否已受理，草稿已保留。</span>
         <Button variant="outline" className="min-h-[44px]" onClick={() => void run(() => submitMagnetItems(submissionRequest.indices, submissionRequest.scope, submissionRequest.force))}>重试确认提交</Button>
       </div>}
-      {bound && job!.items.some((item) => item.status === 'failed') && <Card><CardContent className="space-y-2 p-4">
+      {bound && job!.items.some((item) => item.status === 'failed') && <Card><CardContent className="space-y-3 p-4">
         <p className="text-sm font-medium">解析失败，输入已保留</p>
         {job!.items.filter((item) => item.status === 'failed').map((item) => <p key={item.index} className="text-sm text-destructive">第 {item.index + 1} 行：{item.error_message}</p>)}
+        <p className="text-xs text-muted-foreground">请先确认元数据服务地址与健康状态，再重试失败项；已确认的条目不会被重复请求。</p>
+        {!parsing && <Button variant="outline" className="min-h-[44px] gap-1" disabled={state.changing}
+          onClick={() => void run(() => changeMagnetParse('resume', job!.items.filter((item) => item.status === 'failed').map((item) => item.index)))}>
+          <RotateCcw className="h-4 w-4" />仅重试失败项（{job!.items.filter((item) => item.status === 'failed').length}）
+        </Button>}
       </CardContent></Card>}
 
-      {results.length > 0 && <div className="space-y-4">
+        {results.length > 0 && <div className="space-y-4">
         <div className="flex flex-col gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
           <div><h2 className="font-semibold">解析结果（{results.length} 项）</h2>
             <p className="text-xs text-muted-foreground">{!targetReady ? '请选择有效下载位置，已失效的位置需要重新选择' : checking ? '正在核对所选目录的重复记录…' : `可提交 ${downloadable.length} 项，重复拦截 ${existingCount} 项`}</p>
+            {existingCount > 0 && <p className="text-xs text-muted-foreground">重复项已置顶显示；批次结束后默认从输入框移除，可在解析结果中继续强制下载。</p>}
           </div>
           {downloadable.length > 0 && <Button onClick={() => submitItems(downloadable.map((item) => item.index), false)}
             disabled={submitting || Boolean(submissionRequest) || parsing || !targetReady || checking || Boolean(checkError)} className="min-h-[44px] gap-2">
@@ -285,7 +344,7 @@ export function MagnetParser() {
         {checkError && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive"><span>{checkError}</span>
           <Button variant="outline" className="min-h-[44px]" onClick={() => setCheckVersion((value) => value + 1)}>重试查重</Button>
         </div>}
-        {results.map((item) => {
+        {orderedResults.map((item) => {
           const outcome = outcomes.get(item.index)
           return <Card key={`${job!.job_id}-${item.index}`}><CardContent className="space-y-3 p-4 sm:p-5">
             <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
@@ -293,21 +352,50 @@ export function MagnetParser() {
                 <span className="text-xs text-muted-foreground">第 {item.index + 1} 条</span>
                 <span className="font-mono text-lg font-bold">{item.verified_code || item.dn_code || '未识别番号'}</span>
                 <Badge variant="secondary">{variantLabel(item.variant)}</Badge>
+                {item.manual_code != null && <Badge variant="outline">手工番号</Badge>}
                 {!targetReady || checking ? <Badge variant="outline">待核对下载位置</Badge> : item.duplicate_allowed ? <Badge variant="success">分集或版本可共存</Badge> : item.duplicate_blocked ?
                   <Badge variant="warning"><AlertTriangle className="mr-1 h-3.5 w-3.5" />库内已存在</Badge> : <Badge variant="outline">库内未收录</Badge>}
                 {(outcome?.status === 'submitted' || outcome?.result?.reason === 'already_submitted') && <Badge variant="info"><CheckCircle2 className="mr-1 h-3.5 w-3.5" />已提交</Badge>}
                 {outcome?.status === 'unknown' && <Badge variant="warning">提交待核实</Badge>}
                 {item.metadata_fallback && <Badge variant="outline">{fallbackLabels[item.fallback_reason ?? ''] ?? '元数据不可用'} · 名称初筛</Badge>}
+                {item.retry_at && <Badge variant="outline"><RotateCcw className="mr-1 h-3.5 w-3.5" />等待重试</Badge>}
               </div>
               <div className="flex gap-2">
                 <Button variant="ghost" size="sm" className="min-h-[44px] gap-1" onClick={() => void handleCopy(item.cleaned_magnet, item.index)}>
                   {copiedIndex === item.index ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}复制磁力
                 </Button>
+                {bound && <Button variant="ghost" size="sm" className="min-h-[44px] gap-1" disabled={parsing || savingCode === item.index}
+                  onClick={() => setEditing(editing?.index === item.index ? null : { index: item.index, value: item.verified_code || item.dn_code || '' })}>
+                  <Pencil className="h-4 w-4" />改番号
+                </Button>}
                 {item.duplicate_blocked && !blocked(outcome) && <Button variant="outline" size="sm" className="min-h-[44px]"
                   disabled={submitting || Boolean(submissionRequest) || parsing || checking || !targetReady || Boolean(checkError)} onClick={() => submitItems([item.index], true)}>强制下载此版</Button>}
               </div>
             </div>
             {item.existing_location && <p className="break-all font-mono text-xs text-muted-foreground">库内路径：{item.existing_location}</p>}
+            {editing?.index === item.index && <div className="space-y-2 rounded-lg border p-3">
+              <label htmlFor={`manual-code-${item.index}`} className="text-sm font-medium">手工番号</label>
+              <p className="text-xs text-muted-foreground">填写后立即重算版本、分集与查重；留空保存表示放弃识别（提交时记为 UNKNOWN）。</p>
+              <div className="flex flex-wrap gap-2">
+                <input id={`manual-code-${item.index}`} value={editing.value} autoComplete="off" spellCheck={false}
+                  onChange={(event) => setEditing({ index: item.index, value: event.target.value })}
+                  onKeyDown={(event) => { if (event.key === 'Enter') void saveManualCode(item.index) }}
+                  placeholder="例如 300MIUM-777"
+                  className="min-h-[44px] min-w-0 flex-1 rounded-md border border-input bg-background px-3 font-mono text-sm" />
+                <Button className="min-h-[44px]" disabled={savingCode === item.index} onClick={() => void saveManualCode(item.index)}>
+                  {savingCode === item.index ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}保存
+                </Button>
+                {item.manual_code != null && <Button variant="outline" className="min-h-[44px]" disabled={savingCode === item.index}
+                  onClick={() => void resetManualCode(item.index)}>恢复自动识别</Button>}
+                <Button variant="ghost" className="min-h-[44px]" onClick={() => setEditing(null)}>取消</Button>
+              </div>
+            </div>}
+            {item.manual_code != null && editing?.index !== item.index && <p className="text-xs text-muted-foreground">
+              番号由手工指定{item.manual_code === '' ? '（已放弃识别，提交时记为 UNKNOWN）' : `：${item.manual_code}`}，重新解析该条目时保留。
+            </p>}
+            {item.retry_at && <p role="status" className="text-xs text-muted-foreground">
+              元数据服务暂不可用，将在 {dateLabel(item.retry_at)} 自动重试（第 {item.attempt} 次尝试）。
+            </p>}
             {outcome && <p role="status" className={`break-all text-sm ${['failed', 'unknown'].includes(outcome.status) ? 'text-destructive' : 'text-muted-foreground'}`}>
               {outcomeMessage(outcome)}{outcome.status === 'unknown' && <Link className="ml-2 underline" to="/tasks">查看任务核实</Link>}
             </p>}

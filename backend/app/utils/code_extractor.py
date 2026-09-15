@@ -2,10 +2,16 @@ import re
 from pathlib import PurePosixPath
 
 # 顺序很重要：多段前缀必须先于通用前缀匹配，否则 FC2-PPV-123 会被截成 FC2。
+# 数字前缀（300MIUM / 259LUXU / 200GANA）要求前缀本身同时含数字与字母，避免把普通番号
+# 前面的发布组编号（如 abc-123ABC-456 里的 123）当成番号组成部分。
 DEFAULT_CODE_PATTERN = re.compile(
-    r"(?ix)(?<![A-Z0-9])((?:FC2(?:[-_ ]?PPV)?|HEYZO|T\d{2,3}|[A-Z]{2,8})[-_ ]?\d{3,8})(?![A-Z0-9])"
+    r"(?ix)(?<![A-Z0-9])("
+    r"(?:FC2(?:[-_ ]?PPV)?|HEYZO|T\d{2,3}|\d{2,6}[A-Z]{2,8}|[A-Z]{2,8})[-_ ]?\d{3,8}"
+    r")(?![A-Z0-9])"
 )
 PURE_NUMBER_PATTERN = re.compile(r"(?<![A-Z0-9])\d{4,8}(?![A-Z0-9])", re.IGNORECASE)
+# 前缀为「纯数字+纯字母」时整体保留，内部不再插入横线，如 300MIUM-777。
+MIXED_PREFIX_CODE = re.compile(r"^\d+[A-Z]+\d+$", re.IGNORECASE)
 VARIANT_SUFFIX = re.compile(r"^[-_ .](UC|C|U)(?![A-Z0-9])", re.IGNORECASE)
 PART_SUFFIX = re.compile(
     r"^(?:[-_ .]*\((\d{1,4})\)|[-_ .]*(?:CD|PART)[-_ .]?(\d{1,4})|[-_ .](\d{1,3}))(?![A-Z0-9])",
@@ -40,7 +46,8 @@ def _normalize(value: str) -> str:
     value = re.sub(r"-+", "-", value)
     # PPV 不参与 FC2 身份判定，保留既有可读格式，避免同一作品被分成两个番号。
     value = re.sub(r"^FC2(?:-?PPV)?-?(\d+)$", r"FC2-PPV-\1", value)
-    if re.fullmatch(r"[A-Z]+\d+", value):
+    # 数字字母混合前缀已含数字，再插横线会把 300MIUM-777 拆成 300-MIUM-777。
+    if not MIXED_PREFIX_CODE.fullmatch(value) and re.fullmatch(r"[A-Z]+\d+", value):
         value = re.sub(r"([A-Z])(?=\d)", r"\1-", value, count=1)
     return value
 

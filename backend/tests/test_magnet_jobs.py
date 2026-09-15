@@ -22,6 +22,7 @@ from app.models.task import DownloadTask
 from app.models.user import User
 from app.services.config_service import update_config
 from app.services.magnet_jobs import MagnetJobRunner, recover_jobs
+from app.services.magnet_metadata_client import MagnetMetadataError
 from app.utils.magnet_parser import magnet_info_hash
 
 
@@ -107,7 +108,8 @@ def jobs(tmp_path):
     runners = []
 
     def runner(**kwargs):
-        value = MagnetJobRunner(sessions, parser_factory=metadata.factory, **kwargs)
+        kwargs.setdefault("parser_factory", metadata.factory)
+        value = MagnetJobRunner(sessions, **kwargs)
         runners.append(value)
         return value
 
@@ -471,3 +473,95 @@ def test_ownership_input_limits_and_creation_conflicts(jobs):
             headers=jobs.headers[0],
         )
         assert response.status_code == 422
+
+
+def test_manual_code_overrides_identity_and_survives_retry(jobs):
+    """手工番号立即生效并重算查重，重试时不被元数据结果顶回。"""
+    runner = jobs.runner()
+    runner.start()
+    job, _ = create_job(jobs, 1)
+    job_id = job["job_id"]
+    wait_until(lambda: get_job(jobs, job_id)["completed"] == 1)
+    path = f"/api/v1/magnets/parse-jobs/{job_id}/items/0"
+    assert get_job(jobs, job_id)["items"][0]["summary"]["verified_code"] == "ABC-100"
+
+    changed = jobs.client.patch(path, json={"code": "300MIUM-777"}, headers=jobs.headers[0])
+    assert changed.status_code == 200, changed.text
+    summary = changed.json()["data"]["summary"]
+    assert summary["verified_code"] == "300MIUM-777"
+    assert summary["variant"] == "original"
+    assert get_job(jobs, job_id)["items"][0]["manual_code"] == "300MIUM-777"
+
+    # 空串表示放弃识别；提交时不得回退到 dn 或文件名。
+    blank = jobs.client.patch(path, json={"code": "  "}, headers=jobs.headers[0])
+    assert blank.status_code == 200, blank.text
+    assert blank.json()["data"]["summary"]["verified_code"] is None
+    assert get_job(jobs, job_id)["items"][0]["manual_code"] == ""
+
+    # null 回退自动识别，dn 结果重新生效。
+    restored = jobs.client.patch(path, json={"code": None}, headers=jobs.headers[0])
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["data"]["summary"]["verified_code"] == "ABC-100"
+    assert get_job(jobs, job_id)["items"][0]["manual_code"] is None
+
+    # 重试该条目后手动结论保持一致，且不额外请求元数据服务去猜测番号。
+    retry = jobs.client.patch(path, json={"code": "300MIUM-777"}, headers=jobs.headers[0])
+    assert retry.status_code == 200, retry.text
+    jobs.metadata.calls.clear()
+    assert jobs.client.post(f"/api/v1/magnets/parse-jobs/{job_id}/resume", json={"indices": [0]}, headers=jobs.headers[0]).status_code == 400
+    wait_until(lambda: get_job(jobs, job_id)["items"][0]["status"] == "completed")
+
+
+def test_manual_code_rejects_invalid_input_and_unfinished_items(jobs):
+    jobs.metadata.gates = {0: threading.Event()}
+    runner = jobs.runner()
+    runner.start()
+    job, _ = create_job(jobs, 1)
+    job_id = job["job_id"]
+    path = f"/api/v1/magnets/parse-jobs/{job_id}/items/0"
+    wait_until(lambda: jobs.metadata.active == 1)
+    # 解析进行中不允许改动，避免结果回写覆盖用户输入。
+    assert jobs.client.patch(path, json={"code": "ABC-123"}, headers=jobs.headers[0]).status_code == 409
+    jobs.metadata.gates[0].set()
+    wait_until(lambda: get_job(jobs, job_id)["completed"] == 1)
+    assert jobs.client.patch(path, json={"code": "x" * 65}, headers=jobs.headers[0]).status_code == 422
+    assert jobs.client.patch(path, json={"code": "ab\x00c"}, headers=jobs.headers[0]).status_code == 422
+    assert jobs.client.patch(path, json={"code": "300MIUM-777"}, headers=jobs.headers[1]).status_code == 404
+
+
+def test_overloaded_metadata_is_retried_with_backoff_then_succeeds(jobs):
+    """503 过载先退避重试，不把整条磁力直接判失败。"""
+    attempts = Counter()
+
+    class Flaky:
+        def factory(self, *_args):
+            owner = self
+
+            class Parser:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_):
+                    pass
+
+                def parse_with_retry(self, uri, **_kwargs):
+                    attempts[int(magnet_info_hash(uri), 16) - 1] += 1
+                    if attempts[0] == 1:
+                        raise MagnetMetadataError("过载", reason="bt_metadata_overloaded", retry_after=0.01)
+                    return {
+                        "info_hash": magnet_info_hash(uri),
+                        "name": "ABC-100",
+                        "size": 600,
+                        "files": [{"name": "ABC-100.mkv", "size": 600}],
+                        "metadata_fallback": False,
+                    }
+
+            return Parser()
+
+    runner = jobs.runner(parser_factory=Flaky().factory, retry_attempts=3)
+    runner.start()
+    job, _ = create_job(jobs, 1)
+    job_id = job["job_id"]
+    wait_until(lambda: get_job(jobs, job_id)["status"] == "completed", timeout=15)
+    assert attempts[0] >= 2
+    assert get_job(jobs, job_id)["confirmed"] == 1

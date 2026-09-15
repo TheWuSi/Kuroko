@@ -341,17 +341,42 @@ FC2 解析结果增加 `part_numbers`：完整媒体文件树中识别到的分�
 }
 ```
 
-同账号、同请求编号及内容返回原任务；编号复用但内容不同、或账号已有其他运行批次时返回 `409`。每账号同时运行一批，解析池最多四条并发。任务在响应后后台执行，每条结果独立保存，关闭页面或令牌过期不取消任务。
+同账号、同请求编号及内容返回原任务；编号复用但内容不同、或账号已有其他运行批次时返回 `409`。每账号同时运行一批，解析池并发条数由 `KUROKO_PARSE_WORKERS` 控制（默认 4，上限 16），并额外受全局并发上限保护，避免把元数据服务打崩。任务在响应后后台执行，每条结果独立保存，关闭页面或令牌过期不取消任务。
 
 | 接口 | 行为 |
 | --- | --- |
 | `GET /magnets/parse-jobs` | 当前账号批次，按创建时间倒序；`page` 默认 1，`page_size` 默认 20、最大 100；可用 `active=true` 或 UUID `request_id` 过滤 |
 | `GET /magnets/parse-jobs/{job_id}` | 批次进度、逐条摘要、关联提交状态 |
-| `GET /magnets/parse-jobs/{job_id}/items/{index}` | 按需读取完整解析结果；`index` 为原始零基索引，范围 0～99 |
+| `GET /magnets/parse-jobs/{job_id}/items/{index}` | 按需读取完整解析结果；`index` 为原始零基索引，范围 0～99；响应不包含服务端内部字段 `auto_code` |
+| `PATCH /magnets/parse-jobs/{job_id}/items/{index}` | 手工修正该条目番号，见下方说明 |
 | `POST /magnets/parse-jobs/{job_id}/cancel` | 停止领取后续条目，已在等待的请求返回或单次超时后收尾，保留结果 |
-| `POST /magnets/parse-jobs/{job_id}/resume` | 请求体 `{}` 继续所有未完成、失败、名称初筛项；可传 `indices` 仅重试选中项，返回 `202` |
+| `POST /magnets/parse-jobs/{job_id}/resume` | 请求体 `{}` 继续所有未完成、失败、名称初筛项；可传 `indices` 仅重试选中项；可传 `keep_duplicates`，返回 `202` |
 
-批次摘要包含 `job_id/request_id/scope/status/cancel_requested/revision/total/completed/confirmed/fallback/failed/created_at/updated_at/finished_at`。批次 `status` 为 `pending/running/completed/cancelled`；`completed` 计已处理数量，`confirmed` 才表示已确认元数据。详情的 `items` 按原索引排序，每项含 `index/magnet/status/attempt/summary/error_message/started_at/finished_at`，条目状态为 `pending/running/completed/fallback/failed`。`summary` 为 4.1 的结果去掉 `files/filtered_files`；文件详情返回 `{index, attempt, status, result}`。
+批次摘要包含 `job_id/request_id/scope/status/cancel_requested/revision/total/completed/confirmed/fallback/failed/created_at/updated_at/finished_at`。批次 `status` 为 `pending/running/completed/cancelled`；`completed` 计已处理数量，`confirmed` 才表示已确认元数据。详情的 `items` 按原索引排序，每项含 `index/magnet/status/attempt/summary/error_message/started_at/finished_at/manual_code/retry_at`，条目状态为 `pending/running/completed/fallback/failed`。`summary` 为 4.1 的结果去掉 `files/filtered_files`；文件详情返回 `{index, attempt, status, result}`。
+
+#### 元数据重试与过载保护
+
+元数据服务超时、过载（HTTP `503`/`429`）或连接失败时，条目不再直接判失败：服务端按指数退避（含抖动、上限 30 秒，并遵循响应的 `Retry-After`）计算下次时间写入 `retry_at`，条目继续留在待解析队列，到期由后台线程重新领取，默认最多尝试 3 次。重试等待时间持久化在数据库中，进程重启后仍会按计划继续。`retry_at` 非空表示该条目正在等待重试；等待期间前端展示“等待重试”标记。元数据服务返回的过载错误不会消耗重试次数，会直接重新排队。
+
+#### `PATCH /magnets/parse-jobs/{job_id}/items/{index}`
+
+请求体只含一个字段 `code`：
+
+```json
+{"code": "300MIUM-777"}
+```
+
+`code` 语义有三态：传普通字符串表示手工指定番号（服务端会规范化，如 `fc2ppv1234567` → `FC2-PPV-1234567`）；传空串 `""` 表示放弃识别，提交时记为 `UNKNOWN`；传 `null` 表示恢复自动识别。格式非法返回 `422`；条目尚未解析完成返回 `409`。
+
+保存后会立刻按新番号重算 `variant`、`part_numbers` 与查重结论，并返回 `{index, status, summary, manual_code}`，其中 `manual_code` 为服务端规范化后的取值（前端应以此回显，而不是本地输入）。手工番号会随条目保留，即使后续触发元数据重试或恢复解析也不会被自动识别结果覆盖。
+
+`POST /magnets/parse-jobs/{job_id}/resume` 的请求体可选 `keep_duplicates`：
+
+```json
+{"indices": [0, 3], "keep_duplicates": false}
+```
+
+`keep_duplicates` 默认 `false`，表示批次收尾时把“库内已存在且不可共存”的重复条目从输入框移除（默认不保留）；传 `true` 则保留在输入框，便于下次继续处理。该参数只影响本次恢复的收尾清理，不改变解析与查重结论本身。
 
 详情 `outcomes` 保存各条目在各目标范围的最近提交状态，包含 `index/status/result/submission_id/scope/task_id`。恢复后仍须调用查重预检，不能把历史查重结论用于新的提交。所有批次与文件详情按账号隔离，读取他人记录返回 `404`。
 

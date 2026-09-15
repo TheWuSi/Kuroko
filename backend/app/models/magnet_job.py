@@ -43,6 +43,10 @@ class MagnetParseItem(Base):
     summary: Mapped[dict | None] = mapped_column(JSON)
     result: Mapped[dict | None] = mapped_column(JSON)
     error_message: Mapped[str | None] = mapped_column(Text)
+    # 用户手工指定或清空的番号；有值时优先于元数据识别结果，空串表示显式放弃识别。
+    manual_code: Mapped[str | None] = mapped_column(String(64))
+    # 重试需要等待的截止时刻；尚未到期的条目不会被后台线程领取。
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
